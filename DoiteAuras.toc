@@ -9,6 +9,7 @@ PizzaSauce.lua
 DoiteAuras.lua
 
 Modules\DoiteShatter.lua
+Modules\DoitePop.lua
 Modules\DoiteBuffData.lua
 Modules\DoitePlayerAuras.lua
 Modules\DoitePetAuras.lua
