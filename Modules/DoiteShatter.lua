@@ -85,7 +85,8 @@ local PARAM_BOUNDS = {
   pAlphaMax   = { 0,  1,    "num" },
 }
 
--- Human-readable order for /dshatter list.
+-- Human-readable order for /dshatter list. Also the positional order
+-- used by export/import strings (see DoiteShatter.ExportPreset).
 local PARAM_ORDER = {
   "grid", "scatterMin", "scatterMax", "stagger", "waveAmp",
   "waveFreqMin", "waveFreqMax", "pieceStart", "dirCone",
@@ -234,6 +235,130 @@ function DoiteShatter.ListPresets()
   end
   table.sort(out)
   return out
+end
+
+-- ---------------------------------------------------------------
+-- Import / export as a compact string.
+--
+-- Format:
+--     DSH1;<v1>,<v2>,...,<vN>
+-- where v1..vN are the values of PARAM_ORDER keys, in that exact
+-- order. Version marker at the front lets future additions to
+-- PARAM_ORDER be detected and handled.
+--
+-- Compact CSV is used instead of key=value because the whole
+-- command has to fit in WoW's chat input box; the k=v form does
+-- not, once all 19 parameters are serialized.
+--
+-- New parameters must be APPENDED to PARAM_ORDER and trigger a
+-- version bump (DSH2 etc.), because positional order is what makes
+-- the format work.
+-- ---------------------------------------------------------------
+
+local EXPORT_VERSION = "DSH1"
+
+-- Format a single value for export. Numbers are trimmed to 4
+-- significant digits so 1/3 does not become "0.33333333333333".
+local function _DS_Fmt(v)
+  if type(v) == "number" then
+    return string.format("%.4g", v)
+  end
+  return tostring(v)
+end
+
+-- Public: current settings as an export string.
+function DoiteShatter.ExportPreset()
+  local cfg = DoiteShatter.GetCfg()
+  local vals = {}
+  local i
+  for i = 1, table.getn(PARAM_ORDER) do
+    local v = cfg[PARAM_ORDER[i]]
+    if v == nil then v = DEFAULTS[PARAM_ORDER[i]] end
+    table.insert(vals, _DS_Fmt(v))
+  end
+  return EXPORT_VERSION .. ";" .. table.concat(vals, ",")
+end
+
+-- Public: a named preset as an export string, or nil if not found.
+function DoiteShatter.ExportNamedPreset(name)
+  local db = _G["DoiteAurasDB"]
+  if not db or not db.shatterPresets then return nil end
+  local p = db.shatterPresets[name]
+  if not p then return nil end
+  local vals = {}
+  local i
+  for i = 1, table.getn(PARAM_ORDER) do
+    local k = PARAM_ORDER[i]
+    local v = p[k]
+    if v == nil then v = DEFAULTS[k] end
+    table.insert(vals, _DS_Fmt(v))
+  end
+  return EXPORT_VERSION .. ";" .. table.concat(vals, ",")
+end
+
+-- Public: apply an export string to the current settings.
+-- Values in the string overwrite matching keys; keys not present in
+-- the string keep their current values. That makes partial strings
+-- (with some values blank) safe to import.
+--
+-- Returns true, appliedCount, skippedCount on success, or
+-- false, errorString on a hard parse failure.
+function DoiteShatter.ImportPreset(str)
+  if type(str) ~= "string" or str == "" then
+    return false, "empty string"
+  end
+
+  local sep = string.find(str, ";", 1, true)
+  if not sep then
+    return false, "missing ';' separator after version marker"
+  end
+  local ver = string.sub(str, 1, sep - 1)
+  if ver ~= EXPORT_VERSION then
+    return false, "unsupported version '" .. ver .. "' (expected " .. EXPORT_VERSION .. ")"
+  end
+
+  local body = string.sub(str, sep + 1)
+
+  -- Split by comma (including an empty trailing token, so we can
+  -- detect an incorrectly truncated string).
+  local parts = {}
+  local tok = ""
+  local i = 1
+  local n = string.len(body)
+  while i <= n + 1 do
+    local c = string.sub(body, i, i)
+    if c == "," or c == "" then
+      table.insert(parts, tok)
+      tok = ""
+    else
+      tok = tok .. c
+    end
+    i = i + 1
+  end
+
+  local expected = table.getn(PARAM_ORDER)
+  local got = table.getn(parts)
+  if got ~= expected then
+    return false, "expected " .. expected .. " values, got " .. got
+  end
+
+  local applied, skipped = 0, 0
+  for i = 1, expected do
+    local k = PARAM_ORDER[i]
+    local v = parts[i]
+    if v ~= nil and v ~= "" then
+      local ok = DoiteShatter.SetParam(k, v)
+      if ok then
+        applied = applied + 1
+      else
+        skipped = skipped + 1
+      end
+    else
+      skipped = skipped + 1
+    end
+  end
+
+  return true, applied, skipped
 end
 
 -- ---------------------------------------------------------------
@@ -746,6 +871,8 @@ end
 --   /dshatter preset load <name>    apply a saved snapshot
 --   /dshatter preset delete <name>  remove a preset
 --   /dshatter preset list           show all presets
+--   /dshatter export [<name>]       print export string
+--   /dshatter import <string>       apply from an export string
 --   /dshatter help                  print usage
 --
 -- Programmatic API (same code path):
@@ -754,6 +881,9 @@ end
 --   DoiteShatter.ResetParam("pCount")
 --   DoiteShatter.SavePreset("wide")
 --   DoiteShatter.LoadPreset("wide")
+--   DoiteShatter.ExportPreset()        -- -> "DSH1;..."
+--   DoiteShatter.ImportPreset(str)     -- -> ok, applied, skipped
+--   DoiteShatter.ExportNamedPreset("wide")
 --
 -- Changes take effect on the NEXT shatter. Active shatters keep the
 -- values they were started with, so the effect stays consistent within
@@ -790,11 +920,14 @@ local function _DS_PrintUsage()
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter preset load <name>   -- apply a saved config")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter preset delete <name> -- remove a preset")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter preset list          -- show all presets")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter export [<name>]      -- print export string (current/preset)")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter import <string>      -- apply from an export string")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter help                 -- this message")
   DEFAULT_CHAT_FRAME:AddMessage("Examples:")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter grid 6")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter pTex white")
-  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter preset save wide")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter export")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter import DSH1;5,400,400,0.25,20,1.5,3,0.3333,60,spark,50,4,14,300,400,0.3,0.7,0.3,0.8")
 end
 
 local function _DS_PrintList()
@@ -839,6 +972,48 @@ local function _DS_HandleCommand(msg)
       DoiteShatter.ResetParam(nil)
       DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter:|r all parameters reset to defaults")
     end
+    return
+  end
+
+  if cmd == "export" then
+    local name = args[2]
+    if name then
+      local str = DoiteShatter.ExportNamedPreset(name)
+      if not str then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter:|r no preset named '" .. name .. "'")
+        return
+      end
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter export '" .. name .. "':|r")
+      DEFAULT_CHAT_FRAME:AddMessage(str)
+    else
+      local str = DoiteShatter.ExportPreset()
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter export (current):|r")
+      DEFAULT_CHAT_FRAME:AddMessage(str)
+    end
+    return
+  end
+
+  if cmd == "import" then
+    if table.getn(args) < 2 then
+      DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter:|r usage: /dshatter import <string>")
+      return
+    end
+    -- Rejoin in case the client split the string on whitespace
+    -- (our format has none, but a stray space from copy-paste would
+    -- otherwise silently drop the tail).
+    local str = args[2]
+    local i
+    for i = 3, table.getn(args) do
+      str = str .. args[i]
+    end
+    local ok, applied, skipped = DoiteShatter.ImportPreset(str)
+    if not ok then
+      DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter:|r import failed: " .. tostring(applied))
+      return
+    end
+    DEFAULT_CHAT_FRAME:AddMessage(
+      "|cff6FA8DC/dshatter:|r imported " .. tostring(applied) ..
+      " values, skipped " .. tostring(skipped))
     return
   end
 
