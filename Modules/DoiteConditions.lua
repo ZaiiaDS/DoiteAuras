@@ -400,6 +400,11 @@ _G.DoiteConditions_CleanupKey = function(key)
   if DoiteConditions._shatterWaitAt then
     DoiteConditions._shatterWaitAt[key] = nil
   end
+  -- Release any pop overlay state for this key.
+  local DP = _G["DoitePop"]
+  if DP and DP.CleanupKey then
+    DP.CleanupKey(key)
+  end
 end
 
 -- =================================================================
@@ -555,6 +560,33 @@ local function _GetCanonicalSpellNameFromData(data)
   return nil
 end
 
+-- Start the cast-confirmation pop animation for every currently
+-- visible Ability icon whose spell matches spellName. Only icons
+-- whose frame is already shown (ready) pop, matching the "cast on
+-- a ready icon" visual. Items / auras are ignored by design.
+function DoiteConditions._StartPopForSpellName(spellName)
+  if not spellName or spellName == "" then return end
+  local DP = _G["DoitePop"]
+  if not DP or not DP.Start then return end
+  local live = DoiteAurasDB and DoiteAurasDB.spells
+  if not live then return end
+
+  local key, data
+  for key, data in pairs(live) do
+    if type(data) == "table"
+       and data.type == "Ability"
+       and _GetCanonicalSpellNameFromData(data) == spellName then
+
+      local frame = _GetIconFrame(key)
+      if frame
+         and frame._daLastShown == true
+         and (not DP.IsActive(key)) then
+        DP.Start(key, frame)
+      end
+    end
+  end
+end
+
 -- =================================================================
 -- Nampower: SPELL_GO_SELF -> cooldown ownership (PLAYER ONLY)
 -- Only used to gate "soon off CD" sliders so shared-CD abilities
@@ -607,6 +639,11 @@ _daCast:SetScript("OnEvent", function()
   Doite_LastGoSelfName = name
 
   _MarkSliderSeen(name)
+
+  -- Cast-confirmation pop: overlay on every visible Ability icon
+  -- whose spell matches. Runs before the shared-CD bookkeeping so
+  -- a spell without a DBC category still pops.
+  DoiteConditions._StartPopForSpellName(name)
 
   -- Record shared-category cooldown so sibling abilities see it too.
   -- See DoiteConditions._GetAbilityCategoryInfo for the record lookup.
