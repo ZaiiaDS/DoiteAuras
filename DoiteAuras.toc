@@ -1,0 +1,36 @@
+## Interface: 11200
+## Title: |cff6FA8DC[DoiteAuras]|r
+## Notes: WeakAuras-light addon for Turtle-like servers. Original by Doite, reworked and expanded by Zaiia.
+## Author: Doite, Zaiia
+## Version: 2.0.7
+## SavedVariablesPerCharacter: DoiteAurasDB
+
+PizzaSauce.lua
+DoiteAuras.lua
+
+Modules\DoiteShatter.lua
+Modules\DoiteBuffData.lua
+Modules\DoitePlayerAuras.lua
+Modules\DoitePetAuras.lua
+Modules\DoiteConditionsTarget.lua
+Modules\DoiteConditionsItem.lua
+Modules\DoiteSlide.lua
+Modules\DoiteConditionsProc.lua
+Modules\DoiteConditionsSpell.lua
+Modules\DoiteConditionsIcons.lua
+Modules\DoiteConditionsAuras.lua
+Modules\DoiteEditHelpers.lua
+Modules\DoiteEdit.lua
+Modules\DoiteEditUIBuild.lua
+Modules\DoiteEditAuraCond.lua
+Modules\DoiteEditUIUpdate.lua
+Modules\DoiteGlow.lua
+Modules\DoiteConditions.lua
+Modules\DoiteConditionsOverlay.lua
+Modules\DoiteConditionsCustom.lua
+Modules\DoiteGroup.lua
+Modules\DoiteLogic.lua
+Modules\DoiteExport.lua
+Modules\DoiteTargetAuras.lua
+Modules\DoiteSettings.lua
+Modules\DoiteBars.lua
