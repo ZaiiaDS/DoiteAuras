@@ -9,7 +9,7 @@ if DoiteAurasFrame then return end
 
 -- Addon version. Read by minimap tooltip and by the DA_VER broadcast.
 -- Keep in sync with .toc ## Version:
-DoiteAuras_Version = "1.8.7"
+DoiteAuras_Version = "2.0.7"
 
 -- SavedVariables init (guarded; do NOT clobber existing data)
 DoiteAurasDB = DoiteAurasDB or {}
@@ -104,8 +104,13 @@ local function DA_ApplyPfUIBorder(frame)
         frame.backdrop = nil
     end
 
-    -- Apply pfUI backdrop
-    pfUI.api.CreateBackdrop(frame)
+    -- Apply pfUI backdrop. Guarded: a broken pfUI install with a missing
+    -- or renamed api.CreateBackdrop would otherwise throw inside
+    -- CreateOrUpdateIcon, which is called from _RefreshIconsCore and
+    -- would then permanently trip DoiteAuras_RefreshInProgress.
+    if pfUI.api and pfUI.api.CreateBackdrop then
+        pcall(pfUI.api.CreateBackdrop, frame)
+    end
 
     -- Apply texture cropping to icon
     if frame.icon and frame.icon.SetTexCoord then
@@ -278,7 +283,10 @@ local function DoiteAuras_RebuildSpellTextureCache()
             if data and data.type == "Ability" then
                 local nm = data.displayName or data.name
                 local t  = nm and cache[nm]
-                if t then data.iconTexture = t end
+                -- Only assign when the value actually changes; otherwise
+                -- every PLAYER_ENTERING_WORLD would rewrite the whole
+                -- table for no reason and burn SavedVariables writes.
+                if t and data.iconTexture ~= t then data.iconTexture = t end
             end
         end
     end
@@ -4102,12 +4110,14 @@ end
 -- =========================
 local DA_PREFIX = "DOITEAURAS"
 
+-- Version string resolver for the version-WHO / broadcast paths.
+-- Note: the minimap section defines its own DA_GetVersion() as a
+-- file-local, so it is NOT visible here; the dead type() branch that
+-- used to live above was removed.
 local function DA_GetVersion_Safe()
-  -- Reuse existing DA_GetVersion() if present (minimap section defines it)
-  if type(DA_GetVersion) == "function" then
-    return DA_GetVersion() or "?"
-  end
-  local v = (GetAddOnMetadata and GetAddOnMetadata("DoiteAuras", "Version")) or (DoiteAuras_Version) or "?"
+  local v = (GetAddOnMetadata and GetAddOnMetadata("DoiteAuras", "Version"))
+            or DoiteAuras_Version
+            or "?"
   return v or "?"
 end
 
@@ -4342,12 +4352,24 @@ DoiteAuras_RefreshIcons = _RefreshIconsCore
 -- every internal call site (buttons, drag-stop, remove-key, spell-
 -- texture rebuild, etc). Reads the global at call time, not at capture
 -- time.
+--
+-- pcall wrapper: _RefreshIconsCore sets DoiteAuras_RefreshInProgress at
+-- its top and clears it at the end. Any error thrown in between (broken
+-- module hook, pfUI API change, bad icon texture, etc.) used to leave
+-- the flag stuck true, turning every subsequent RefreshIcons() into a
+-- silent no-op until /reload. The wrapper guarantees the flag is cleared
+-- on error and surfaces the message in chat instead of hanging silently.
 function RefreshIcons(force)
-    local f = DoiteAuras_RefreshIcons
-    if f then
-        return f(force)
+    local fn = DoiteAuras_RefreshIcons or _RefreshIconsCore
+    local ok, err = pcall(fn, force)
+    if not ok then
+        _G["DoiteAuras_RefreshInProgress"] = false
+        local cf = (DEFAULT_CHAT_FRAME or ChatFrame1)
+        if cf then
+            cf:AddMessage(
+                "|cffff0000DoiteAuras refresh error:|r " .. tostring(err))
+        end
     end
-    return _RefreshIconsCore(force)
 end
 
 RebuildOrder(); RefreshList(); RefreshIcons()

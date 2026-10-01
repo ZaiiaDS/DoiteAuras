@@ -31,17 +31,24 @@ This is a reworked and expanded fork of the original [DoiteAuras](https://github
 - Custom condition block input, for unlimited coding freedom
 
 ### Added in this fork
-- **Custom glow effect with full settings panel** — behind/in front, scale, alpha, RGB color picker, animation speed, texture selection (Doite Glow compound preset, Action button border, and more).
+- **Reworked settings window** — everything configurable from one panel.
+- **Font customization** — font, size and outline for timer and stack text, set either globally or per icon.
+- **Name wildcards for auras** — track by patterns like `Seal of*` to match every rank and variant with one entry.
+- **Popup effect on cast** — a short scale + glow burst over the icon when a spell successfully casts. Duration, peak scale, glow color, scale and texture are all tunable.
+- **Custom glow effect** — behind / in front, scale, alpha, RGB color, animation speed, rotation, and a texture picker that browses built-in textures plus the bundled MPOWA pack (246 textures).
+- **Glow and popup presets** — save the current configuration under a name, switch, rename or delete it later.
 - **"Soon off CD" effect choice** — ability icons can now signal cooldown-end either by sliding in or by **shatter-assemble**: the icon reassembles itself from a grid of scattered pieces flying in from the side, with optional wave motion and fading.
 - **Particle sparks** — alongside the shatter pieces, a cloud of small particles flies in from the same direction; each has its own size, alpha and delay.
 - **Command-line tuner `/dshatter`** — every shatter and particle parameter can be tweaked live, with named presets saved to SavedVariables (`/dshatter help` for the full reference).
 - **Shared cooldown tracking via DBC category** — Holy Strike / Crusader Strike and other server-side shared-CD pairs are now correctly detected, so the "soon off CD" effect triggers on siblings even when the client reports 0/0 for them.
+- **Debug tools** — live player/target aura counts, aura cap simulation, and spell-cast debug output.
 - [**PizzaSauce animation library**](https://codeberg.org/Pizzahawaii/PizzaSauce) — used internally for the shatter effect. Full credit to PizzaSauce's authors; see the library header for its license.
 
 ### Optimizations
 - Lazy resolution of the animation library (safe against `.toc` load-order changes).
 - Texture pools for shatter pieces and particles — reused across animations, no per-cast allocation.
 - Shared setter functions — no per-piece closures in the hot path.
+- Optional dynamic particle cap — automatically reduces the particle count of new shatters when many are running at once.
 - Rate-limited full re-evaluation during the armed cooldown window (10 Hz instead of every frame).
 - Reduced per-frame C-API calls in the shatter animator.
 - Cleanup of stale per-key state on icon removal (glow version cache, shatter marks, wait timers).

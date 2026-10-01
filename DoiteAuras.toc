@@ -10,7 +10,6 @@ DoiteAuras.lua
 
 Modules\DoiteShatter.lua
 Modules\DoitePop.lua
-Modules\DoiteBuffData.lua
 Modules\DoitePlayerAuras.lua
 Modules\DoitePetAuras.lua
 Modules\DoiteConditionsTarget.lua
@@ -26,6 +25,7 @@ Modules\DoiteEditUIBuild.lua
 Modules\DoiteEditAuraCond.lua
 Modules\DoiteEditUIUpdate.lua
 Modules\DoiteGlow.lua
+Modules\DoiteTexturePicker.lua
 Modules\DoiteConditions.lua
 Modules\DoiteConditionsOverlay.lua
 Modules\DoiteConditionsCustom.lua
