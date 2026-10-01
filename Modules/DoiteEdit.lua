@@ -12,23 +12,12 @@ local ClearDropdown
 local SafeRefresh
 local SafeEvaluate
 local srows
-local ShowSeparatorsForType
-local SetSeparator
 local SetGroupMode
 local DEFAULT_CUSTOM_FUNCTION_SOURCE
 
--- Icon-level category UI helpers (assigned later from CreateConditionsUI)
-
--- AuraCond_* definitions moved to Modules/DoiteEditAuraCond.lua (loaded after
--- this file). References below use _G["AuraCond_*"] or the proxies in
--- DoiteEditCtx. VfxCond_* stay local for now (extracted later).
-
--- file-scope forward declaration (used by UpdateConditionsUI)
-local AuraOwner_UpdateDependentChecks
-
--- VfxCond_* definitions moved to Modules/DoiteEditAuraCond.lua (loaded after
--- this file). References below use _G["VfxCond_*"].
-
+-- AuraCond_* and VfxCond_* live in Modules/DoiteEditAuraCond.lua (loaded
+-- after this file); they are reached through _G[...] or via the proxies
+-- in DoiteEditCtx.
 
 -- ==================================================================
 -- Helpers moved to Modules/DoiteEditHelpers.lua
@@ -42,7 +31,6 @@ local _EditFlagLabelForValue      = _G["DoiteEdit_FlagLabelForValue"]
 local _ParseFadeAlphaFromBox      = _G["DoiteEdit_ParseFadeAlphaFromBox"]
 local _NormalizeFadeBox           = _G["DoiteEdit_NormalizeFadeBox"]
 local DoiteEdit_SetDropdownInteractive    = _G["DoiteEdit_SetDropdownInteractive"]
-local DoiteEdit_HookDropDownButtonOnClick = _G["DoiteEdit_HookDropDownButtonOnClick"]
 
 local function _ApplyFontsNowEdit()
     if type(DoiteAuras_ApplyFontsToAllIcons) == "function" then
@@ -182,15 +170,7 @@ local function DoiteEdit_InitSoundDropdown(dd, typeKey, eventKey, selectedValue)
 end
 
 -- Class gates + cooldown/display helpers moved to Modules/DoiteEditHelpers.lua.
--- Local aliases below.
 local _IsRogueOrDruid                  = _G["DoiteEdit_IsRogueOrDruid"]
-local _IsHunterOrWarlock               = _G["DoiteEdit_IsHunterOrWarlock"]
-local _DA_GetAbilityCooldownDuration   = _G["DoiteEdit_GetAbilityCooldownDuration"]
-local _DA_SetSliderTimeDisplay         = _G["DoiteEdit_SetSliderTimeDisplay"]
-local DoiteEdit_AbilitySupportsProcSound = _G["DoiteEdit_AbilitySupportsProcSound"]
-local DoiteEdit_YellowifyButton        = _G["DoiteEdit_YellowifyButton"]
-local DoiteEdit_EnableCheck            = _G["DoiteEdit_EnableCheck"]
-local DoiteEdit_DisableCheck           = _G["DoiteEdit_DisableCheck"]
 
 local function DoiteEdit_AddGroupModeOption(typeKey, text, value)
   local info = UIDropDownMenu_CreateInfo()
@@ -207,7 +187,7 @@ local function DoiteEdit_AddGroupModeOption(typeKey, text, value)
   UIDropDownMenu_AddButton(info)
 end
 
--- === Throttle for heavy UI work moved to Modules/DoiteEditThrottle.lua ===
+-- Heavy-work throttle lives in DoiteEditHelpers.lua.
 local DoiteEdit_QueueHeavy = _G["DoiteEdit_QueueHeavy"]
 local DoiteEdit_FlushHeavy = _G["DoiteEdit_FlushHeavy"]
 
@@ -310,15 +290,9 @@ EnsureDBEntry = function(key)
       d.conditions.ability.form = "All"
     end
 
-    if d.conditions.ability.targetDistance == nil then
-      d.conditions.ability.targetDistance = nil
-    end
-    if d.conditions.ability.targetUnitType == nil then
-      d.conditions.ability.targetUnitType = nil
-    end
-    if d.conditions.ability.weaponFilter == nil then
-      d.conditions.ability.weaponFilter = nil
-    end
+    -- targetDistance / targetUnitType / weaponFilter are intentionally
+    -- left nil: nil means "Any" and the UI treats it as the neutral
+    -- state. Writing nil over nil is a no-op.
 
     -- legacy cleanup
     d.conditions.ability.target = nil
@@ -369,15 +343,8 @@ EnsureDBEntry = function(key)
       ic.form = "All"
     end
 
-    if ic.targetDistance == nil then
-      ic.targetDistance = nil
-    end
-    if ic.targetUnitType == nil then
-      ic.targetUnitType = nil
-    end
-    if ic.weaponFilter == nil then
-      ic.weaponFilter = nil
-    end
+    -- targetDistance / targetUnitType / weaponFilter intentionally not
+    -- initialized; nil == "Any".
 
   elseif d.type == "Custom" then
     -- custom code drives visibility/texture/overlay; no stock condition subtree
@@ -424,15 +391,8 @@ EnsureDBEntry = function(key)
       d.conditions.aura.form = "All"
     end
 
-    if d.conditions.aura.targetDistance == nil then
-      d.conditions.aura.targetDistance = nil
-    end
-    if d.conditions.aura.targetUnitType == nil then
-      d.conditions.aura.targetUnitType = nil
-    end
-    if d.conditions.aura.weaponFilter == nil then
-      d.conditions.aura.weaponFilter = nil
-    end
+    -- targetDistance / targetUnitType / weaponFilter intentionally not
+    -- initialized; nil == "Any".
 
     if d.conditions.aura.trackpet == nil then
       d.conditions.aura.trackpet = false
@@ -471,7 +431,6 @@ SafeRefresh = function()
 end
 
 -- Position/Size range helpers moved to Modules/DoiteEditHelpers.lua.
-local _DA_GetParentDims        = _G["DoiteEdit_GetParentDims"]
 local _DA_ComputePosSizeRanges = _G["DoiteEdit_ComputePosSizeRanges"]
 
 -- apply to existing sliders and clamp the current DB values if out of range
@@ -1041,8 +1000,7 @@ local function SetExclusiveAuraFoundMode(mode)
   SafeEvaluate()
 end
 
--- _GoldifyDD / _GreyifyDD / _WhiteifyDDText moved to Modules/DoiteEditHelpers.lua
--- (exposed as globals with same names).
+-- _GoldifyDD / _GreyifyDD / _WhiteifyDDText live in DoiteEditHelpers.lua.
 
 -- Only touch the text / placeholder when DISABLING.
 -- NOTE: must be a global, not a file-local. The DoiteEditCtx closure for
@@ -1076,10 +1034,9 @@ function _SetDDEnabled(dd, enabled, placeholderText)
   end
 end
 
--- Pretty-print helper: announce when entering edit for an icon
+-- Announce once per edit session when the user opens an icon in the editor.
 local lastAnnouncedKey = nil
 
--- Pretty-print helper: announce when entering edit for an icon
 local function DoiteEdit_AnnounceEditingIcon(displayName)
   -- Only announce once per icon per edit session
   if currentKey and lastAnnouncedKey == currentKey then
@@ -1141,14 +1098,13 @@ local function CompileCustomFunctionSource(source)
   return fn, nil
 end
 
--- AuraCond_TitleCase moved to Modules/DoiteEditHelpers.lua.
+-- Both live in DoiteEditHelpers.lua.
 local AuraCond_TitleCase = _G["DoiteEdit_AuraCond_TitleCase"]
+local StylePlainEditBox  = _G["DoiteEdit_StylePlainEditBox"]
 
 ----------------------------------------------------------------
 -- Conditions UI creation & wiring
 ----------------------------------------------------------------
--- StylePlainEditBox moved to Modules/DoiteEditHelpers.lua.
-local StylePlainEditBox = _G["DoiteEdit_StylePlainEditBox"]
 
 -- ==================================================================
 -- Shared context for DoiteEdit submodules (AuraCond, VfxCond, UIBuild, UpdateUI).
@@ -1180,19 +1136,11 @@ do
   ctx.SetCombatFlag            = function(t, w, e) return SetCombatFlag(t, w, e) end
   ctx.SetExclusiveAuraFoundMode = function(mode) return SetExclusiveAuraFoundMode(mode) end
 
-  -- Forward-decl helpers (may be nil at load; become valid after CreateConditionsUI)
-  ctx.SetSeparator = function(...)
-    if SetSeparator then return SetSeparator(...) end
-  end
-  ctx.ShowSeparatorsForType = function(...)
-    if ShowSeparatorsForType then return ShowSeparatorsForType(...) end
-  end
+  -- Forward-decl helper (may be nil at load; becomes valid after CreateConditionsUI)
   ctx.ReflowCondAreaHeight = function()
     local f = _G["DoiteEdit_ReflowCondAreaHeight"]
     if f then return f() end
   end
-  ctx.getAuraOwnerUpdate = function() return AuraOwner_UpdateDependentChecks end
-  ctx.setAuraOwnerUpdate = function(fn) AuraOwner_UpdateDependentChecks = fn end
   ctx.InitWeaponDropdown = function(...)
     if InitWeaponDropdown then return InitWeaponDropdown(...) end
   end
@@ -1256,8 +1204,7 @@ function DoiteConditions_Show(key)
     return
   end
 
-  -- Jeremy: This is the main frame and cond names, this comment is just a refence for me :D
-  -- create the frame if needed
+  -- Create the editor frame on first open.
   if not condFrame then
     condFrame = CreateFrame("Frame", "DoiteConditionsFrame", UIParent)
 
@@ -1294,19 +1241,11 @@ function DoiteConditions_Show(key)
     end)
     condFrame.editCloseBtn = editCloseBtn
 
-    -- Free drag by the header ("title bar"). Classic StartMoving /
-    -- StopMovingOrSizing pair. Position is NOT persisted: it resets on
-    -- /reload because it is never written to SavedVariables.
-    --
-    -- On the very first drag the frame is still anchored to
-    -- DoiteAurasFrame (see SetPoint above); that relative anchor is
-    -- dropped and replaced with an absolute UIParent-relative one at
-    -- the frame's current on-screen spot. Without this, StartMoving()
-    -- would keep following the main settings window.
-    --
-    -- The handle spans the top strip only; the close button is excluded
-    -- (TOPLEFT of handle -> TOPLEFT of frame, TOPRIGHT -> TOPLEFT of
-    -- editCloseBtn), so X keeps its own click.
+    -- Drag handle across the top strip (the close button is excluded so
+    -- X keeps its own click). On the first drag the frame detaches from
+    -- its DoiteAurasFrame-relative anchor and reanchors to UIParent at
+    -- its current screen position, so StartMoving stops following the
+    -- main settings window. Position is not persisted.
     local editDragBar = CreateFrame("Frame", nil, condFrame)
     editDragBar:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 0, 0)
     editDragBar:SetPoint("TOPRIGHT", editCloseBtn, "TOPLEFT", 0, 5)
@@ -2191,7 +2130,7 @@ function DoiteConditions_Show(key)
   condFrame:Show()
   UpdateCondFrameForKey(key)
 
-  -- Принудительно обновить кэш edit-состояния
+  -- Force-refresh the cached edit-state globals other modules read.
   _G.DoiteConditions_EditOpen = true
   _G.DoiteConditions_EditKey  = key
   if _G["DoiteConditions"] then

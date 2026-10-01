@@ -231,20 +231,15 @@ local function CreateConditionsUI()
     end
   end
 
-  -- === Tunable: extra gap below the SLIDING ICON block ===
-  -- Change ONLY this number to slide RESOURCE and everything below it.
-  -- Positive = further down. Do not touch any other constants.
+  -- Extra gap below the SLIDING ICON block. Positive = push everything
+  -- below further down. Only this value is meant to be tuned here.
   local SLIDING_EXTRA = 20
   condFrame._slidingExtra = SLIDING_EXTRA
 
   -- === Separator Y positions ===
   local srow1_y, srow2_y, srow3_y, srow4_y, srow5_y = -5, -45, -110, -150, -190
   local srow6_y, srow7_y = -230, -270
-  -- srow8 (RESOURCE for abilities) sits 3px below the bottom of the
-  -- EFFECT hint. Hint anchor is at row7_y - 68 (= -353 with default
-  -- values); its text height is ~11px, so bottom ~= -364. Target
-  -- separator Y = -367, which is -347 - SLIDING_EXTRA with
-  -- SLIDING_EXTRA = 20.
+  -- srow8 (RESOURCE for abilities) is placed just under the EFFECT hint.
   local srow8_y,  srow9_y,  srow10_y = -347 - SLIDING_EXTRA, -385 - SLIDING_EXTRA, -425 - SLIDING_EXTRA
   local srow11_y, srow12_y, srow13_y = -465 - SLIDING_EXTRA, -505 - SLIDING_EXTRA, -545 - SLIDING_EXTRA
   local srow14_y, srow15_y           = -585 - SLIDING_EXTRA, -625 - SLIDING_EXTRA
@@ -431,20 +426,17 @@ local function CreateConditionsUI()
 
   condFrame.cond_ability_slider = MakeCheck("DoiteCond_Ability_Slider", "Soon off CD", 0, row7_y)
 
-  -- Direction dropdown moved to row 2 (below Soon off CD). Row 1 now
-  -- holds the Effect dropdown, so direction had to give up that slot.
-  -- Frame anchor at x=-16 so the *visible* left edge lands at x=0
-  -- (UIDropDownMenuTemplate has ~16px internal left padding).
+  -- Direction DD sits on the second row (below "Soon off CD").
+  -- Template carries ~16px internal left padding, so anchor at -16 to
+  -- land the visible left edge at 0.
   condFrame.cond_ability_slider_dir = CreateFrame("Frame", "DoiteCond_Ability_SliderDir", _Parent(), "UIDropDownMenuTemplate")
   condFrame.cond_ability_slider_dir:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", -16, row7_y - 24 + 5)
   if UIDropDownMenu_SetWidth then
-    -- Widest option is "center"; 60 leaves a comfortable margin.
     pcall(UIDropDownMenu_SetWidth, 60, condFrame.cond_ability_slider_dir)
   end
 
-  -- Effect dropdown now sits on the SAME row as "Soon off CD"; its
-  -- label is placed to the right of the dropdown. Dropdown width is
-  -- sized to fit the longest option ("Shatter (assemble)").
+  -- Effect dropdown (Slide / Shatter) sits on the same row as
+  -- "Soon off CD". Width sized for "Shatter (assemble)".
   condFrame.cond_ability_slider_effect = CreateFrame("Frame", "DoiteCond_Ability_SliderEffect", _Parent(), "UIDropDownMenuTemplate")
   condFrame.cond_ability_slider_effect:SetPoint("TOPLEFT", _Parent(), "TOPLEFT", 70, row7_y + 4)
   if UIDropDownMenu_SetWidth then
@@ -503,9 +495,8 @@ local function CreateConditionsUI()
   StylePlainEditBox(condFrame.cond_ability_slider_time, "CENTER")
   condFrame.cond_ability_slider_time:SetNumeric(true)
 
-  -- (sec.) hint next to the EditBox. Purely a label: its visibility,
-  -- and the visibility of the hintline / bottom separator below, is
-  -- managed explicitly by UpdateConditionsUI (see _HideSlidingUI).
+  -- (sec.) label next to the EditBox. Visibility is managed by
+  -- UpdateConditionsUI (see _HideSlidingUI).
   condFrame.cond_ability_slider_time_label = _Parent():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   condFrame.cond_ability_slider_time_label:SetPoint(
       "LEFT", condFrame.cond_ability_slider_time, "RIGHT", 2, 0)
@@ -556,8 +547,6 @@ local function CreateConditionsUI()
   condFrame.cond_ability_slider_fading_cb:SetScript("OnLeave", function()
     if GameTooltip then GameTooltip:Hide() end
   end)
-
-  -- (bottom separator removed by request; RESOURCE separator is enough)
 
   -- Placeholder handling: on focus gain we clear the grey placeholder so
   -- the user types into a blank field. On text change we mark the field as
@@ -4185,9 +4174,6 @@ local function UpdateItemStacksForMissing()
   condFrame.cond_ability_hp_val_enter:Hide()
   condFrame.cond_ability_slider_glow:Hide()
   condFrame.cond_ability_slider_grey:Hide()
-  if condFrame.cond_ability_slider_effect_label then
-    condFrame.cond_ability_slider_effect_label:Hide()
-  end
   if condFrame.cond_ability_slider_effect then
     condFrame.cond_ability_slider_effect:Hide()
   end
@@ -4199,9 +4185,6 @@ local function UpdateItemStacksForMissing()
   end
   if condFrame.cond_ability_slider_time_hintline then
     condFrame.cond_ability_slider_time_hintline:Hide()
-  end
-  if condFrame.cond_ability_slider_bottom_sep then
-    condFrame.cond_ability_slider_bottom_sep:Hide()
   end
   if condFrame.cond_ability_slider_fading_cb then
     condFrame.cond_ability_slider_fading_cb:Hide()
@@ -4415,12 +4398,9 @@ local function UpdateItemStacksForMissing()
   end
 end
 
--- NOTE: DoiteEdit_SetSeparator / DoiteEdit_ShowSeparatorsForType /
--- DoiteEdit_AuraOwner_UpdateDependentChecks are installed as real
--- functions inside CreateConditionsUI (via _G[...] assignments there).
--- Pre-refactor code also assigned the local forwarder wrappers here,
--- which turned the globals into self-recursive stubs (each wrapper
--- called back into the same global it was just installed under).
--- Those assignments were removed; only the entry point is exported.
+-- DoiteEdit_SetSeparator / DoiteEdit_ShowSeparatorsForType /
+-- DoiteEdit_AuraOwner_UpdateDependentChecks are installed as globals
+-- inside CreateConditionsUI. Do not re-export them here: assigning a
+-- local forwarder wrapper to the same key makes the global recursive.
 
 _G["DoiteEdit_CreateConditionsUI"] = CreateConditionsUI

@@ -21,8 +21,6 @@ local function _CK() return ctx.getCurrentKey() end
 
 -- Core helpers (through ctx)
 local function _EDB(k)     return ctx.EnsureDBEntry(k) end
-local function _SR()        ctx.SafeRefresh()          end
-local function _SE()        ctx.SafeEvaluate()         end
 local function _CD(dd)     return ctx.ClearDropdown(dd) end
 local function _Reflow()    ctx.ReflowCondAreaHeight()  end
 
@@ -30,10 +28,7 @@ local function _Reflow()    ctx.ReflowCondAreaHeight()  end
 local DoiteEdit_EnableCheck               = _G["DoiteEdit_EnableCheck"]
 local DoiteEdit_DisableCheck              = _G["DoiteEdit_DisableCheck"]
 local DoiteEdit_SetDropdownInteractive    = _G["DoiteEdit_SetDropdownInteractive"]
-local DoiteEdit_YellowifyButton           = _G["DoiteEdit_YellowifyButton"]
-local StylePlainEditBox                   = _G["DoiteEdit_StylePlainEditBox"]
 local _GoldifyDD                          = _G["_GoldifyDD"]
-local _GreyifyDD                          = _G["_GreyifyDD"]
 local _WhiteifyDDText                     = _G["_WhiteifyDDText"]
 local _IsRogueOrDruid                     = _G["DoiteEdit_IsRogueOrDruid"]
 local _IsHunterOrWarlock                  = _G["DoiteEdit_IsHunterOrWarlock"]
@@ -82,6 +77,10 @@ local function AuraOwner_UpdateDependentChecks()
   if f then return f() end
 end
 
+-- Lazy global proxies: SetSeparator / ShowSeparatorsForType. Both are
+-- installed into _G by DoiteEditUIBuild.lua and are called from the
+-- Item / Ability / Aura branches below.
+
 local function SetSeparator(...)
   local f = _G["DoiteEdit_SetSeparator"]
   if f then return f(...) end
@@ -104,7 +103,49 @@ local function _SetAuraCheckEnabled(cb, enabled, clearWhenDisabling)
   end
 end
 
--- Dynamically resize the scroll/content area to fit the last visible row (+20px buffer) + Dynamically resize the scroll/content area AND reposition VFX sections
+-- Hide every "Soon off CD" slider widget at once. Called from the top of
+-- UpdateConditionsUI and from UpdateCondFrameForKey (the Bar early-return
+-- path skips UpdateConditionsUI). Individual branches re-show what they
+-- need afterwards.
+local function _HideAbilitySliderWidgets(condFrame)
+  if not condFrame then return end
+  -- NOTE: cond_ability_slider_bottom_sep and cond_ability_slider_effect_label
+  -- no longer exist (removed / never created). Do not re-add them here
+  -- unless they are re-created in DoiteEditUIBuild.lua.
+  local list = {
+    condFrame.cond_ability_slider,
+    condFrame.cond_ability_slider_dir,
+    condFrame.cond_ability_slider_time,
+    condFrame.cond_ability_slider_time_label,
+    condFrame.cond_ability_slider_time_slider,
+    condFrame.cond_ability_slider_time_hintline,
+    condFrame.cond_ability_slider_effect,
+    condFrame.cond_ability_slider_glow,
+    condFrame.cond_ability_slider_grey,
+    condFrame.cond_ability_slider_fading_cb,
+  }
+  local i
+  for i = 1, table.getn(list) do
+    local w = list[i]
+    if w and w.Hide then w:Hide() end
+  end
+end
+
+-- Class-based widget gates (file scope so they are not rebuilt per repaint).
+local function _IsWarriorPaladinShaman()
+  local _, cls = UnitClass("player")
+  cls = cls and string.upper(cls) or ""
+  return (cls == "WARRIOR" or cls == "PALADIN" or cls == "SHAMAN")
+end
+
+local function _PlayerCanUseFormDD()
+  local _, cls = UnitClass("player")
+  cls = cls and string.upper(cls) or ""
+  return (cls == "WARRIOR" or cls == "ROGUE" or cls == "DRUID" or cls == "PRIEST" or cls == "PALADIN")
+end
+
+-- Resize the scroll content to fit the deepest visible row (+20px pad),
+-- then push the VFX sections to sit just below the aura/item anchors.
 local function _ReflowCondAreaHeight()
   local condFrame = _CF()
   if not condFrame then
@@ -300,25 +341,11 @@ local function UpdateConditionsUI(data)
   end
   _HideSoundControls()
 
-  -- Hide the slider Effect dropdown by default; it is re-shown only for
-  -- Ability icons with "Soon off CD" enabled (see the Ability branch
-  -- below). Doing it here keeps Item/Aura/Custom branches from having to
-  -- know about the widget.
-  if condFrame.cond_ability_slider_effect then
-    condFrame.cond_ability_slider_effect:Hide()
-  end
-  if condFrame.cond_ability_slider_effect_label then
-    condFrame.cond_ability_slider_effect_label:Hide()
-  end
-
-  -- Reset fade controls upfront to prevent visual leakage between icon categories.
-  -- The Ability "Soon off CD" Fading checkbox must also be reset here: the
-  -- Item / Aura / Custom branches below never touch it, so switching from an
-  -- Ability with slider enabled used to leave it visible on other icon types.
-  -- The Ability branch re-shows it later only when the slider is active.
-  if condFrame.cond_ability_slider_fading_cb then
-    condFrame.cond_ability_slider_fading_cb:Hide()
-  end
+  -- Hide every "Soon off CD" slider widget upfront so switching away
+  -- from an Ability icon cannot leak any of them into another type.
+  -- The Ability branch re-shows each one later as needed; Item / Aura /
+  -- Custom do not need to know about the group at all.
+  _HideAbilitySliderWidgets(condFrame)
   if condFrame.cond_ability_fade then condFrame.cond_ability_fade:Hide() end
   if condFrame.cond_ability_fade_slider then condFrame.cond_ability_fade_slider:Hide() end
   if condFrame.cond_aura_fade then condFrame.cond_aura_fade:Hide() end
@@ -337,13 +364,6 @@ local function UpdateConditionsUI(data)
     condFrame.cond_custom_function_status:Hide()
     condFrame.cond_custom_function_status:SetText("")
   end
-
-  local function _IsWarriorPaladinShaman()
-    local _, cls = UnitClass("player")
-    cls = cls and string.upper(cls) or ""
-    return (cls == "WARRIOR" or cls == "PALADIN" or cls == "SHAMAN")
-  end
-
 
   -- ABILITY
   if data.type == "Ability" then
@@ -599,16 +619,6 @@ local function UpdateConditionsUI(data)
       condFrame.cond_ability_slider_time_hintline:SetText(text)
       condFrame.cond_ability_slider_time_hintline:Show()
     end
-    local function _HideBottomSep()
-      -- Line under the hint removed by request; RESOURCE separator is enough.
-      -- Named _Hide (not _Show) because it always hides. The "hard
-      -- guarantee" block at the end of UpdateConditionsUI performs the
-      -- same hide once more on every repaint; this helper keeps the
-      -- intent explicit at the call site.
-      if condFrame.cond_ability_slider_bottom_sep then
-        condFrame.cond_ability_slider_bottom_sep:Hide()
-      end
-    end
     local function _HideSlidingUI()
       condFrame.cond_ability_slider_dir:Hide()
       if condFrame.cond_ability_slider_time then
@@ -643,7 +653,6 @@ local function UpdateConditionsUI(data)
       condFrame.cond_ability_slider:Show()
       _HideSlidingUI()
       _SetHint("No cooldown: sliding not available.")
-      _HideBottomSep()
 
       condFrame.cond_ability_slider_glow:Hide()
       condFrame.cond_ability_slider_grey:Hide()
@@ -671,9 +680,6 @@ local function UpdateConditionsUI(data)
       end
       if condFrame.cond_ability_slider_fading_cb then
         condFrame.cond_ability_slider_fading_cb:Hide()
-      end
-      if condFrame.cond_ability_slider_bottom_sep then
-        condFrame.cond_ability_slider_bottom_sep:Show()
       end
       if remEnabled then
         condFrame.cond_ability_remaining_comp:Show()
@@ -747,9 +753,6 @@ local function UpdateConditionsUI(data)
             condFrame.cond_ability_slider_fading_cb.text:SetTextColor(1, 0.82, 0)
           end
         end
-        if condFrame.cond_ability_slider_bottom_sep then
-          condFrame.cond_ability_slider_bottom_sep:Show()
-        end
       else
         condFrame.cond_ability_slider_dir:Hide()
         if condFrame.cond_ability_slider_time then
@@ -766,9 +769,6 @@ local function UpdateConditionsUI(data)
             "Enable 'Soon off CD' to use sliding.")
           condFrame.cond_ability_slider_time_hintline:Show()
         end
-        if condFrame.cond_ability_slider_bottom_sep then
-          condFrame.cond_ability_slider_bottom_sep:Show()
-        end
       end
       condFrame.cond_ability_remaining_cb:SetChecked(false)
       condFrame.cond_ability_remaining_comp:Hide()
@@ -777,11 +777,8 @@ local function UpdateConditionsUI(data)
       condFrame.cond_ability_remaining_cb:Hide()
     end
 
-    -- Hard guarantee: hide optional parts that must never leak out of
-    -- their branches (bottom separator + Fading checkbox).
-    if condFrame.cond_ability_slider_bottom_sep then
-      condFrame.cond_ability_slider_bottom_sep:Hide()
-    end
+    -- Fading only appears when the slider is active. Everything else is
+    -- handled by _HideAbilitySliderWidgets at the top of this function.
     if condFrame.cond_ability_slider_fading_cb then
       local cb = condFrame.cond_ability_slider_fading_cb
       -- Show Fading only when the slider UI is actually active.
@@ -876,7 +873,6 @@ local function UpdateConditionsUI(data)
 
     -- Row 9: Slider extras (only when slider is enabled AND mode is usable/notcd)
     if slidEnabled and (mode == "usable" or mode == "notcd") then
-    if slidEnabled and (mode == "usable" or mode == "notcd") then
       condFrame.cond_ability_slider_glow:Show()
       condFrame.cond_ability_slider_grey:Show()
       condFrame.cond_ability_slider_glow:SetChecked((c.ability and c.ability.sliderGlow) or false)
@@ -912,11 +908,7 @@ local function UpdateConditionsUI(data)
 
 
     -- initialize and show/hide Form dropdown based on player class availability
-    local choices = (function()
-      local _, cls = UnitClass("player")
-      cls = cls and string.upper(cls) or ""
-      return (cls == "WARRIOR" or cls == "ROGUE" or cls == "DRUID" or cls == "PRIEST" or cls == "PALADIN")
-    end)()
+    local choices = _PlayerCanUseFormDD()
 
     -- hide the aura dropdown if it exists
     if condFrame.cond_aura_formDD then
@@ -1250,7 +1242,8 @@ local function UpdateConditionsUI(data)
       _vcRef("item")
     end
 
-local ic = c.item or {}
+if not c.item then c.item = {} end
+local ic = c.item
 
     local function _enCheck(cb)
       if not cb then
@@ -1487,10 +1480,12 @@ local ic = c.item or {}
       -- UnitType still follow the old rules
       _RestoreItemDD(condFrame.cond_item_unitTypeDD, ic.targetUnitType, "Unit type")
 
-      local isMissingForDD = (ic.whereMissing == true)
+      -- Use the effective missing state, not the raw whereMissing flag:
+      -- an item that may also appear while equipped/bagged is still
+      -- trackable, so target UnitType must stay enabled for it.
       local hasSelfTarget = (ic.targetSelf == true)
 
-      if isMissingForDD or hasSelfTarget then
+      if isMissing or hasSelfTarget then
         ic.targetUnitType = nil
         _SetDDEnabled(condFrame.cond_item_unitTypeDD, false, "Unit type")
       else
@@ -2030,11 +2025,7 @@ local ic = c.item or {}
       condFrame.cond_aura_formDD:Hide()
     end
 
-    local choices = (function()
-      local _, cls = UnitClass("player")
-      cls = cls and string.upper(cls) or ""
-      return (cls == "WARRIOR" or cls == "ROGUE" or cls == "DRUID" or cls == "PRIEST" or cls == "PALADIN")
-    end)()
+    local choices = _PlayerCanUseFormDD()
     if choices and condFrame.cond_item_formDD then
       condFrame.cond_item_formDD:Show()
       _CD(condFrame.cond_item_formDD)
@@ -2207,7 +2198,7 @@ local ic = c.item or {}
   elseif data.type == "Custom" then
     -- Hide all separators – the edit box fills the entire conditions area.
     for _, list in pairs(condFrame._seps or {}) do
-      for _, sep in pairs(list) do
+      for _i, sep in pairs(list) do
         sep:Hide()
       end
     end
@@ -2403,7 +2394,9 @@ local ic = c.item or {}
     _Hide(condFrame.cond_item_unitTypeDD)
     _Hide(condFrame.cond_item_clickable)
 
-    -- AURA (Buff/Debuff)
+    -- AURA (Buff/Debuff). Any other type falls through here as well;
+    -- only Ability / Item / Custom have dedicated branches above. If a
+    -- new type is added later, give it its own branch above this one.
   else
     if ShowSeparatorsForType then ShowSeparatorsForType("aura") end
 
@@ -2634,8 +2627,6 @@ local ic = c.item or {}
     DoiteEdit_SetDropdownInteractive(condFrame.cond_aura_sound_ongain_dd, auraSoundGainOn)
     DoiteEdit_SetDropdownInteractive(condFrame.cond_aura_sound_onfade_dd, auraSoundFadeOn)
 
-    local isBuff = (data.type == "Buff")
-
     -- Combo points / class-specific note / weapon filter
     local isRogueOrDruid = _IsRogueOrDruid and _IsRogueOrDruid() or false
     local isWPS = _IsWarriorPaladinShaman()
@@ -2728,34 +2719,7 @@ local ic = c.item or {}
     end
 
     -- Aura owner flags ("My Aura" / "Others Aura") – buff and debuff identical.
-    local function _AO_SetEnabled(cb, enabled, clearWhenDisabling)
-      if not cb then
-        return
-      end
-      if type(_SetAuraCheckEnabled) == "function" then
-        _SetAuraCheckEnabled(cb, enabled, clearWhenDisabling)
-        return
-      end
-
-      if enabled then
-        if cb.Enable then
-          cb:Enable()
-        end
-        if cb.text and cb.text.SetTextColor then
-          cb.text:SetTextColor(1, 0.82, 0)
-        end
-      else
-        if clearWhenDisabling and cb.SetChecked then
-          cb:SetChecked(false)
-        end
-        if cb.Disable then
-          cb:Disable()
-        end
-        if cb.text and cb.text.SetTextColor then
-          cb.text:SetTextColor(0.6, 0.6, 0.6)
-        end
-      end
-    end
+    local _AO_SetEnabled = _SetAuraCheckEnabled
 
     local onlyMine = (c.aura and c.aura.onlyMine) and true or false
     local onlyOthers = (c.aura and c.aura.onlyOthers) and true or false
@@ -2958,11 +2922,7 @@ local ic = c.item or {}
     end
 
     -- Form dropdown for aura
-    local choices = (function()
-      local _, cls = UnitClass("player")
-      cls = cls and string.upper(cls) or ""
-      return (cls == "WARRIOR" or cls == "ROGUE" or cls == "DRUID" or cls == "PRIEST" or cls == "PALADIN")
-    end)()
+    local choices = _PlayerCanUseFormDD()
 
     if condFrame.cond_ability_formDD then
       condFrame.cond_ability_formDD:Hide()
@@ -3387,17 +3347,15 @@ function UpdateCondFrameForKey(key)
   ctx.setCurrentKey(key)
   _G["DoiteEdit_CurrentKey"] = key
 
-  -- Jeremy added : Always clean up a previous bar injection before doing anything else
+  -- Clean up any bar-edit injection from the previous icon first.
   if DoiteBars and DoiteBars.CleanupCondFrame then
     DoiteBars.CleanupCondFrame(condFrame)
   end
 
-  -- Ability "Soon off CD" Fading checkbox: reset here as well so it cannot
-  -- leak into the Bar path. The Bar branch below early-returns before
-  -- UpdateConditionsUI, so its own reset would never run for Bar edits.
-  if condFrame.cond_ability_slider_fading_cb then
-    condFrame.cond_ability_slider_fading_cb:Hide()
-  end
+  -- The Bar branch below early-returns before UpdateConditionsUI runs,
+  -- so reset the "Soon off CD" slider widgets here as well; otherwise
+  -- they leak into the Bar view.
+  _HideAbilitySliderWidgets(condFrame)
 
   -- Bar type: DoiteBars injection
   local _earlyData = DoiteAurasDB and DoiteAurasDB.spells and DoiteAurasDB.spells[key]
