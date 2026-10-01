@@ -119,10 +119,9 @@ local function _ReflowCondAreaHeight()
 
   if condFrame.abilityAuraAnchor and condFrame.abilityAuraAnchor:IsShown() then
     local visHeight = condFrame.abilityAuraAnchor:GetHeight() or 20
-    
-    local ROW14_Y = -585 - SLIDING_EXTRA
+
     local ROW15_Y = -640 - SLIDING_EXTRA
-    
+
     local expansion = visHeight - 20
     if expansion < 0 then expansion = 0 end
     
@@ -149,7 +148,6 @@ local function _ReflowCondAreaHeight()
   -- Aura VFX base is (row17_y) = -670
   if condFrame.auraAuraAnchor and condFrame.auraAuraAnchor:IsShown() then
     local visHeight = condFrame.auraAuraAnchor:GetHeight() or 20
-    local AURA_VIS_Y = -665 - SLIDING_EXTRA
     local AURA_VFX_Y = -705 - SLIDING_EXTRA
     
     local expansion = visHeight - 20
@@ -174,7 +172,6 @@ local function _ReflowCondAreaHeight()
   -- Item VFX base is row18_y = -590
   if condFrame.itemAuraAnchor and condFrame.itemAuraAnchor:IsShown() then
     local visHeight = condFrame.itemAuraAnchor:GetHeight() or 20
-    local ITEM_VIS_Y = -705 - SLIDING_EXTRA
     local ITEM_VFX_Y = -745 - SLIDING_EXTRA
     
     local expansion = visHeight - 20
@@ -201,8 +198,9 @@ local function _ReflowCondAreaHeight()
     return
   end
 
-  -- Reusable buffer (избегаем аллокации на каждый вызов).
-  -- Храним в _G, потому что _ReflowCondAreaHeight — функция (на неё нельзя вешать поля).
+  -- Reusable buffer (avoids reallocation on every call).
+  -- Stored on _G because _ReflowCondAreaHeight is a function (cannot attach
+  -- fields to it).
   local children = _G["DoiteEdit_ReflowChildrenBuf"]
   if not children then
     children = {}
@@ -314,6 +312,13 @@ local function UpdateConditionsUI(data)
   end
 
   -- Reset fade controls upfront to prevent visual leakage between icon categories.
+  -- The Ability "Soon off CD" Fading checkbox must also be reset here: the
+  -- Item / Aura / Custom branches below never touch it, so switching from an
+  -- Ability with slider enabled used to leave it visible on other icon types.
+  -- The Ability branch re-shows it later only when the slider is active.
+  if condFrame.cond_ability_slider_fading_cb then
+    condFrame.cond_ability_slider_fading_cb:Hide()
+  end
   if condFrame.cond_ability_fade then condFrame.cond_ability_fade:Hide() end
   if condFrame.cond_ability_fade_slider then condFrame.cond_ability_fade_slider:Hide() end
   if condFrame.cond_aura_fade then condFrame.cond_aura_fade:Hide() end
@@ -870,8 +875,7 @@ local function UpdateConditionsUI(data)
     end
 
     -- Row 9: Slider extras (only when slider is enabled AND mode is usable/notcd)
-    -- (mode уже объявлена выше в этой ветке)
-    local slidEnabled = (c.ability and c.ability.slider) and true or false
+    if slidEnabled and (mode == "usable" or mode == "notcd") then
     if slidEnabled and (mode == "usable" or mode == "notcd") then
       condFrame.cond_ability_slider_glow:Show()
       condFrame.cond_ability_slider_grey:Show()
@@ -3386,6 +3390,13 @@ function UpdateCondFrameForKey(key)
   -- Jeremy added : Always clean up a previous bar injection before doing anything else
   if DoiteBars and DoiteBars.CleanupCondFrame then
     DoiteBars.CleanupCondFrame(condFrame)
+  end
+
+  -- Ability "Soon off CD" Fading checkbox: reset here as well so it cannot
+  -- leak into the Bar path. The Bar branch below early-returns before
+  -- UpdateConditionsUI, so its own reset would never run for Bar edits.
+  if condFrame.cond_ability_slider_fading_cb then
+    condFrame.cond_ability_slider_fading_cb:Hide()
   end
 
   -- Bar type: DoiteBars injection

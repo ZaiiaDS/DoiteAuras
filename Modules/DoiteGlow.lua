@@ -55,13 +55,95 @@ DG.Textures = {
     tc = { 0.2, 0.8, 0.2, 0.8 } },
 }
 
+-- MPOWA texture family (Textures\MPOWA\AuraN, N = 1..246). No
+-- directory-enumeration API in 1.12, so the count is hardcoded. A
+-- value with this prefix and a numeric suffix within range is a
+-- valid glow texture, exactly like the entries in DG.Textures.
+DG.MPOWA_PREFIX = "Interface\\AddOns\\DoiteAuras\\Textures\\MPOWA\\Aura"
+DG.MPOWA_COUNT  = 246
+
+function DG.IsMPOWATexture(v)
+  if type(v) ~= "string" or v == "" then return false end
+  local prefix = DG.MPOWA_PREFIX
+  if string.sub(v, 1, string.len(prefix)) ~= prefix then return false end
+  local rest = string.sub(v, string.len(prefix) + 1)
+  if string.find(rest, "^%d+$") == nil then return false end
+  local n = tonumber(rest)
+  if not n or n < 1 or n > DG.MPOWA_COUNT then return false end
+  return true
+end
+
+-- Human-readable label for a texture value. Handles both the static
+-- DG.Textures list and the MPOWA family. Falls back to "?" for
+-- unknown values.
+function DG.GetTextureLabelForValue(v)
+  if DG.IsMPOWATexture(v) then
+    local n = tonumber(string.sub(v, string.len(DG.MPOWA_PREFIX) + 1))
+    return "MPOWA - Aura" .. tostring(n)
+  end
+  local list = DG.Textures
+  if type(list) == "table" then
+    local i
+    for i = 1, table.getn(list) do
+      if list[i].value == v then return list[i].text end
+    end
+  end
+  return "?"
+end
+
+-- Build the entry list the generic picker consumes: every static
+-- DG.Textures entry (client textures + compound Doite Glow), then the
+-- MPOWA family Aura1..AuraN.
+--
+-- The compound Doite Glow entry has no file path of its own, so its
+-- thumbnail shows frame 1 of the Ants sprite (same texcoord the
+-- runtime uses).
+function DG.GetPickerEntries()
+  local entries = {}
+
+  local list = DG.Textures
+  if type(list) == "table" then
+    local i
+    for i = 1, table.getn(list) do
+      local e = list[i]
+      if e.value == DOITE_GLOW_ID then
+        entries[table.getn(entries) + 1] = {
+          value      = e.value,
+          label      = e.text,
+          previewTex = ANTS_TEX,
+          tc         = { 0.0078, 0.1796, 0.0039, 0.1757 },
+        }
+      else
+        entries[table.getn(entries) + 1] = {
+          value = e.value,
+          label = e.text,
+          tc    = e.tc,
+        }
+      end
+    end
+  end
+
+  local prefix = DG.MPOWA_PREFIX
+  local n      = DG.MPOWA_COUNT or 0
+  local i
+  for i = 1, n do
+    entries[table.getn(entries) + 1] = {
+      value = prefix .. tostring(i),
+      label = "MPOWA - Aura" .. tostring(i),
+    }
+  end
+
+  return entries
+end
+
 local DEFAULTS = {
-  behind  = false,
-  scale   = 1.0,
-  alpha   = 1.0,
+  behind   = false,
+  scale    = 1.0,
+  alpha    = 1.0,
   r = 1, g = 1, b = 1,
-  speed   = 0.04,
-  texture = DOITE_GLOW_ID,
+  speed    = 0.04,
+  texture  = DOITE_GLOW_ID,
+  rotation = 0,           -- degrees, 0..360; converted to radians on apply
 }
 
 function DG.GetSettings()
@@ -74,19 +156,25 @@ function DG.GetSettings()
   if s.r       == nil then s.r       = DEFAULTS.r       end
   if s.g       == nil then s.g       = DEFAULTS.g       end
   if s.b       == nil then s.b       = DEFAULTS.b       end
-  if s.speed   == nil then s.speed   = DEFAULTS.speed   end
-  if s.texture == nil then s.texture = DEFAULTS.texture end
+  if s.speed    == nil then s.speed    = DEFAULTS.speed    end
+  if s.texture  == nil then s.texture  = DEFAULTS.texture  end
+  if s.rotation == nil then s.rotation = DEFAULTS.rotation end
 
   -- Migrate legacy saved values (older builds stored raw texture paths).
   if s.texture == ANTS_TEX or s.texture == ALERT_TEX then
     s.texture = DOITE_GLOW_ID
   end
 
-  -- Reject anything not currently offered.
+  -- Reject anything not currently offered. MPOWA textures are also
+  -- valid even though they are not listed in DG.Textures (246 entries;
+  -- not worth materializing just to validate one string).
   local valid = false
   local i
   for i = 1, table.getn(DG.Textures) do
     if DG.Textures[i].value == s.texture then valid = true; break end
+  end
+  if (not valid) and DG.IsMPOWATexture(s.texture) then
+    valid = true
   end
   if not valid then s.texture = DEFAULTS.texture end
 
@@ -185,6 +273,18 @@ local function ApplyShape(overlay, frame, s)
     overlay.glow:SetVertexColor(s.r or 1, s.g or 1, s.b or 1, s.alpha or 1)
     overlay.glow:SetBlendMode("ADD")
     overlay._mode = "border"
+  end
+
+  -- Texture rotation. Stored in degrees; SetRotation wants radians.
+  -- Applied to both layers of the compound Doite Glow so the static
+  -- background and the animated ants stay aligned.
+  do
+    local rotDeg = tonumber(s.rotation) or 0
+    local rotRad = math.rad(rotDeg)
+    if overlay.glow.SetRotation then overlay.glow:SetRotation(rotRad) end
+    if overlay.bg and overlay.bg.SetRotation then
+      overlay.bg:SetRotation(rotRad)
+    end
   end
 
   overlay.index        = 1
@@ -330,4 +430,173 @@ function DG.BumpVersion()
   if DoiteConditions_RequestEvaluate then
     DoiteConditions_RequestEvaluate()
   end
+end
+
+-- =================================================================
+-- Presets.
+--
+-- DoiteAurasDB.glowPresets[name] = { <snapshot of editable fields> }
+-- DoiteAurasDB.glowActivePreset = name | nil
+--
+-- A preset is a snapshot of every user-editable glow field, including
+-- `texture` (which can be a static DG.Textures value, the compound
+-- DOITE_GLOW_ID, or an MPOWA path). Runtime / migration fields
+-- (`blend`, `_version`-style markers, DoiteGlow_Version) are NOT
+-- part of a preset.
+--
+-- Manual edits to the Glow controls keep writing straight into
+-- DoiteAurasDB.glow (as they always did) and do NOT retarget the
+-- active preset. On the next /reload the active preset is re-applied,
+-- discarding any unsaved tweaks -- that is the contract the UI hint
+-- spells out.
+-- =================================================================
+local PRESET_FIELDS = {
+  "behind", "scale", "alpha",
+  "r", "g", "b",
+  "speed", "texture",
+  "rotation",
+}
+
+function DG.GetPresetSnapshot()
+  local s = DG.GetSettings()
+  local snap = {}
+  local i
+  for i = 1, table.getn(PRESET_FIELDS) do
+    local k = PRESET_FIELDS[i]
+    snap[k] = s[k]
+  end
+  return snap
+end
+
+-- Copy a snapshot into the live glow settings. by default this bumps
+-- the version so every active overlay rebuilds; pass a truthy `noBump`
+-- to skip (used on load, where there is nothing cached to invalidate).
+function DG.ApplyPresetSnapshot(t, noBump)
+  if type(t) ~= "table" then return end
+  local s = DG.GetSettings()
+  local i
+  for i = 1, table.getn(PRESET_FIELDS) do
+    local k = PRESET_FIELDS[i]
+    if t[k] ~= nil then
+      s[k] = t[k]
+    end
+  end
+  if not noBump then
+    DG.BumpVersion()
+  end
+end
+
+-- glow01, glow02, ... first free slot. Falls back to a random suffix
+-- if the sequence is somehow exhausted (paranoia).
+function DG.GenerateNewPresetName()
+  DoiteAurasDB = DoiteAurasDB or {}
+  local presets = DoiteAurasDB.glowPresets or {}
+  local n = 1
+  while n < 1000 do
+    local name = string.format("glow%02d", n)
+    if presets[name] == nil then
+      return name
+    end
+    n = n + 1
+  end
+  return "glow" .. tostring(math.random(1000, 9999))
+end
+
+-- Snapshot current glow into a freshly-named preset, mark it active,
+-- return the chosen name.
+function DG.SaveCurrentAsPreset()
+  DoiteAurasDB = DoiteAurasDB or {}
+  DoiteAurasDB.glowPresets = DoiteAurasDB.glowPresets or {}
+  local name = DG.GenerateNewPresetName()
+  DoiteAurasDB.glowPresets[name] = DG.GetPresetSnapshot()
+  DoiteAurasDB.glowActivePreset = name
+  return name
+end
+
+-- Delete a preset by name. If it was the active one, clear the
+-- active ref so the next load does not re-apply a vanished snapshot.
+function DG.DeletePreset(name)
+  local db = _G["DoiteAurasDB"]
+  if not db or not db.glowPresets or not name then return false end
+  if not db.glowPresets[name] then return false end
+  db.glowPresets[name] = nil
+  if db.glowActivePreset == name then
+    db.glowActivePreset = nil
+  end
+  return true
+end
+
+-- Rename a preset, preserving its snapshot. No-op if `from` is
+-- missing or `to` is empty / already taken. If the renamed preset was
+-- active, the active ref follows the new name.
+function DG.RenamePreset(from, to)
+  local db = _G["DoiteAurasDB"]
+  if not db or not db.glowPresets then return false end
+  if not from or not to or to == "" then return false end
+  local p = db.glowPresets[from]
+  if not p then return false end
+  if from == to then return true end
+  if db.glowPresets[to] then return false end
+  db.glowPresets[to] = p
+  db.glowPresets[from] = nil
+  if db.glowActivePreset == from then
+    db.glowActivePreset = to
+  end
+  return true
+end
+
+-- Sorted list of preset names (ascending). Empty table when none.
+function DG.ListPresets()
+  local db = _G["DoiteAurasDB"]
+  if not db or not db.glowPresets then return {} end
+  local out = {}
+  local k
+  for k in pairs(db.glowPresets) do
+    table.insert(out, k)
+  end
+  table.sort(out)
+  return out
+end
+
+-- One-shot on addon load: if a preset was selected before the last
+-- reload, re-apply it over the raw SavedVariables glow. Runs at the
+-- bottom of this file, AFTER all functions above are defined and
+-- AFTER WoW has already populated DoiteAurasDB.
+--
+-- noBump = true: there are no active overlays yet, no point in
+-- invalidating a version counter that nobody is caching against.
+function DG.ApplyActivePresetOnLoad()
+  if DG._activePresetApplied == true then return end
+  DG._activePresetApplied = true
+
+  local db = _G["DoiteAurasDB"]
+  if not db then return end
+  local name = db.glowActivePreset
+  if not name or name == "" then return end
+  local presets = db.glowPresets
+  if not presets then return end
+  local p = presets[name]
+  if not p then
+    -- Active name points at a preset that no longer exists (manual
+    -- SavedVariables surgery, older version). Drop the dangling ref.
+    db.glowActivePreset = nil
+    return
+  end
+  DG.ApplyPresetSnapshot(p, true)
+end
+
+-- Defer to ADDON_LOADED: on this client the per-character
+-- SavedVariables are NOT populated when the .lua chunk runs, so a
+-- file-scope call would see an empty DoiteAurasDB and skip. The
+-- event fires after SV load, so the preset seeding lands in the
+-- right place. Same pattern as DoitePop.lua.
+do
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("ADDON_LOADED")
+  f:SetScript("OnEvent", function()
+    if arg1 == "DoiteAuras" then
+      DG.ApplyActivePresetOnLoad()
+      f:UnregisterEvent("ADDON_LOADED")
+    end
+  end)
 end

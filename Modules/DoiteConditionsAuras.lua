@@ -317,18 +317,23 @@ local function _GetTrackedByName()
     ttl = 15.0
   end
 
+  local builtAt = _trackedBuiltAt or 0
+
+  -- Fast path: TTL has not expired. Return cached without scanning the
+  -- DB. The previous version counted DoiteAurasDB.spells on every call
+  -- (even when returning the cache) to detect size changes; that O(n)
+  -- pass ran on every UNIT_AURA event. This map only feeds cosmetic
+  -- updates (auto-texture / spellid stamping), never condition
+  -- visibility, so a short stale window after add/remove is harmless.
+  if _trackedByName and (now - builtAt) < ttl then
+    return _trackedByName
+  end
+
   local dbSize = 0
   if DoiteAurasDB and DoiteAurasDB.spells then
     for _ in pairs(DoiteAurasDB.spells) do
       dbSize = dbSize + 1
     end
-  end
-
-  local builtAt = _trackedBuiltAt or 0
-  local cachedSize = _trackedByName and _trackedByName._dbSize or nil
-
-  if _trackedByName and (now - builtAt) < ttl and cachedSize == dbSize then
-    return _trackedByName
   end
 
   local t = _trackedByName
@@ -814,6 +819,20 @@ local function _GetAuraStacksOnUnit(unit, auraName, wantDebuff, auraSpellId, add
   end
 
   ----------------------------------------------------------------
+  -- Pet: prefer the event-driven cache maintained by DoitePetAuras
+  -- when it is active (means at least one trackpet icon exists and the
+  -- class is WARLOCK/HUNTER). Falls through to the generic scan when
+  -- the cache is unavailable, so unit="pet" still works without it.
+  ----------------------------------------------------------------
+  if unit == "pet" then
+    local DP = _G["DoitePetAuras"]
+    if DP and DP.enabled == true and DP.GetStacks then
+      return DP.GetStacks(auraName, wantDebuff, auraSpellId, addedViaSpellId)
+    end
+    -- fall through to generic scan below
+  end
+
+  ----------------------------------------------------------------
   -- Primary scan: normal BUFF / DEBUFF list for non-player units
   ----------------------------------------------------------------
   local i = 1
@@ -1212,9 +1231,11 @@ local function _EnsureAuraTexture(frame, data)
       icon:SetTexture(data.iconTexture)
     end
 
-    IconCache[name] = data.iconTexture
-    if DoiteAurasDB and DoiteAurasDB.cache then
-      DoiteAurasDB.cache[name] = data.iconTexture
+    if IconCache[name] ~= data.iconTexture then
+      IconCache[name] = data.iconTexture
+      if DoiteAurasDB and DoiteAurasDB.cache then
+        DoiteAurasDB.cache[name] = data.iconTexture
+      end
     end
     return
   end
@@ -1230,9 +1251,11 @@ local function _EnsureAuraTexture(frame, data)
           icon:SetTexture(tex)
         end
 
-        IconCache[name] = tex
-        if DoiteAurasDB and DoiteAurasDB.cache then
-          DoiteAurasDB.cache[name] = tex
+        if IconCache[name] ~= tex then
+          IconCache[name] = tex
+          if DoiteAurasDB and DoiteAurasDB.cache then
+            DoiteAurasDB.cache[name] = tex
+          end
         end
         if DoiteAurasDB and DoiteAurasDB.spells and data.key and DoiteAurasDB.spells[data.key] then
           DoiteAurasDB.spells[data.key].iconTexture = tex
@@ -1253,9 +1276,11 @@ local function _EnsureAuraTexture(frame, data)
           icon:SetTexture(tex)
         end
 
-        IconCache[name] = tex
-        if DoiteAurasDB and DoiteAurasDB.cache then
-          DoiteAurasDB.cache[name] = tex
+        if IconCache[name] ~= tex then
+          IconCache[name] = tex
+          if DoiteAurasDB and DoiteAurasDB.cache then
+            DoiteAurasDB.cache[name] = tex
+          end
         end
         if DoiteAurasDB and DoiteAurasDB.spells and data.key and DoiteAurasDB.spells[data.key] then
           local s = DoiteAurasDB.spells[data.key]

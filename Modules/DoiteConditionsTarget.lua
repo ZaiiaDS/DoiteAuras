@@ -89,14 +89,46 @@ local function _GetSpellIdCached(spellName)
   return nil
 end
 
+-- Melee spells (RangeIndex flags == 1 in the DBC) are not range-checked
+-- by the 1.12 client. Nampower's IsSpellInRange delegates to the client's
+-- RangeCheckSelected, which returns 1 for melee spells regardless of
+-- distance (verified: Raptor Strike, maxRange=5, returns 1 at 25 yards).
+-- Measure melee distance directly via UnitXP_SP3 instead.
+--
+-- Ranged spells (flags == 0) work correctly through the client path
+-- (verified: Arcane Shot returns 0 in melee deadzone, 1 at 25 yards,
+-- 0 at 100+ yards) and are left on IsSpellInRange.
+--
+-- Margin added to the DBC maxRange. DBC stores base range without
+-- combat reach; UnitXP measures between unit centers. Real melee
+-- connects a bit past base range on larger targets.
+local _MELEE_RANGE_BUFFER = 2.0
+
 local function _IsSpellInRangeSafe(spellName, unit)
   if not spellName or not unit then
     return nil
   end
 
-  -- Nampower fast path: IsSpellInRange accepts spellId directly.
   local sid = _GetSpellIdCached(spellName)
 
+  -- Melee path: use UnitXP distance when available.
+  if sid and sid ~= 0
+      and type(GetSpellRecField) == "function"
+      and type(GetSpellRangeData) == "function"
+      and type(UnitXP) == "function" then
+    local okRI, ri = pcall(GetSpellRecField, sid, "rangeIndex")
+    if okRI and ri then
+      local okRD, _mn, mx, fl = pcall(GetSpellRangeData, ri)
+      if okRD and fl == 1 and mx and mx > 0 then
+        local okD, dist = pcall(UnitXP, "distanceBetween", "player", unit)
+        if okD and dist then
+          return dist <= (mx + _MELEE_RANGE_BUFFER)
+        end
+      end
+    end
+  end
+
+  -- Ranged / everything else: Nampower IsSpellInRange is reliable.
   if sid and sid ~= 0 and type(IsSpellInRange) == "function" then
     local ok, res = pcall(IsSpellInRange, sid, unit)
     if ok then
@@ -108,7 +140,7 @@ local function _IsSpellInRangeSafe(spellName, unit)
     end
   end
 
-  -- Fallback: legacy name-based call.
+  -- Legacy fallback: name-based call.
   if type(IsSpellInRange) == "function" then
     local ok, res = pcall(IsSpellInRange, spellName, unit)
     if ok then

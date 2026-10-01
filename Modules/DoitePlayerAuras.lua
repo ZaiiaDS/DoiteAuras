@@ -25,6 +25,12 @@ local DoitePlayerAuras = {
 
   playerBuffIndexCache = {}, -- spell name -> player buff index (for GetPlayerBuffX functions)
 
+  -- numActiveBuffs / numActiveDebuffs are NOT counts of active auras.
+  -- UpdateAuras sets them to the highest 1-based slot index populated
+  -- during the last scan (e.g. slot 5 filled while 3 empty -> value 5),
+  -- and BUFF_REMOVED_SELF / DEBUFF_REMOVED_SELF decrement them by 1.
+  -- They exist solely for the "are we at cap?" check
+  -- (>= MAX_BUFF_SLOTS). Do NOT use them as a count anywhere.
   numActiveBuffs = 0,
   numActiveDebuffs = 0,
 
@@ -430,6 +436,11 @@ BuffAddedFrame:SetScript("OnEvent", function()
   local auraSlot = arg6 -- 0-based raw slot (0-31 for buffs)
   local state = arg7 -- 0=added, 1=removed, 2=modified (stack change)
 
+  -- Defensive: on unexpected event payloads (custom client, future
+  -- server change), auraSlot can be nil; the arithmetic below would
+  -- then throw inside the event handler and kill the whole tick.
+  if not auraSlot then return end
+
   local slot = auraSlot + 1 -- convert to 1-based for internal buffs table
   DoitePlayerAuras.buffs[slot].spellId = spellId
   DoitePlayerAuras.buffs[slot].stacks = stacks
@@ -455,6 +466,9 @@ BuffRemovedFrame:SetScript("OnEvent", function()
   local stacks = arg4
   local auraSlot = arg6 -- 0-based raw slot (0-31 for buffs)
   local state = arg7 -- 0=added, 1=removed, 2=modified (stack decrease)
+
+  -- Defensive: see BuffAddedFrame. Same reason.
+  if not auraSlot then return end
 
   local slot = auraSlot + 1 -- convert to 1-based for internal buffs table
 
@@ -495,6 +509,9 @@ DebuffAddedFrame:SetScript("OnEvent", function()
   local auraSlot = arg6 -- 0-based raw slot (32-47 for debuffs)
   local state = arg7 -- 0=added, 1=removed, 2=modified (stack change)
 
+  -- Defensive: see BuffAddedFrame. Same reason.
+  if not auraSlot then return end
+
   local slot = auraSlot - MAX_BUFF_SLOTS + 1 -- convert to 1-based debuff index (1-16)
   DoitePlayerAuras.debuffs[slot].spellId = spellId
   DoitePlayerAuras.debuffs[slot].stacks = stacks
@@ -516,6 +533,9 @@ DebuffRemovedFrame:SetScript("OnEvent", function()
   local stacks = arg4
   local auraSlot = arg6 -- 0-based raw slot (32-47 for debuffs)
   local state = arg7 -- 0=added, 1=removed, 2=modified (stack decrease)
+
+  -- Defensive: see BuffAddedFrame. Same reason.
+  if not auraSlot then return end
 
   local slot = auraSlot - MAX_BUFF_SLOTS + 1 -- convert to 1-based debuff index (1-16)
 
@@ -583,11 +603,18 @@ AuraCastFrame:SetScript("OnEvent", function()
   end
 end)
 
+-- Forward declaration. Filled in at the bottom of this file for easy
+-- editing; the reference here is picked up as an upvalue, so filling it
+-- after these functions are defined is safe (Lua 5.0 resolves it on the
+-- first call, which only happens after a spell event, i.e. after load).
+local STACK_MODIFIERS
+
 -- Shared logic for processing spell casts that may consume stacks or clearcasting
 local function ProcessBuffCappedSpell(spellId, casterGUID, targetGUID)
-  if DoiteBuffData.stackModifiers[spellId] then
-    local modifiedBuffName = DoiteBuffData.stackModifiers[spellId].modifiedBuffName
-    local stackChange = DoiteBuffData.stackModifiers[spellId].stackChange
+  local mod = STACK_MODIFIERS[spellId]
+  if mod then
+    local modifiedBuffName = mod.modifiedBuffName
+    local stackChange = mod.stackChange
 
     local currentStacks = DoitePlayerAuras.cappedBuffsStacks[modifiedBuffName] or 0
 
@@ -596,7 +623,7 @@ local function ProcessBuffCappedSpell(spellId, casterGUID, targetGUID)
       local newStacks = math.min(currentStacks + stackChange, maxStacks)
       DoitePlayerAuras.cappedBuffsStacks[modifiedBuffName] = newStacks
 
-      local duration = DoiteBuffData.stackModifiers[spellId].duration
+      local duration = mod.duration
       if duration then
         DoitePlayerAuras.cappedBuffsExpirationTime[modifiedBuffName] = GetTime() + duration
       end
@@ -693,3 +720,135 @@ end
 function DoitePlayerAuras.ToggleDebugBuffCap()
   DoitePlayerAuras.SetDebugBuffCap(not DoitePlayerAuras.debugBuffCap)
 end
+
+-- ================================================================
+-- Buff stack modifiers (merged from DoiteBuffData.lua)
+-- ================================================================
+-- Spells that modify OTHER buff stacks. Gaining stacks for the same
+-- spell is already handled by the client. Include `duration` when a
+-- spell adds/creates/refreshes a buff so the expiration tracker knows
+-- how long to extend.
+--
+-- key               : spellId of the casting spell
+-- modifiedBuffName  : name of the affected buff (as shown on the player)
+-- stackChange       : signed delta applied to the affected buff's stacks
+-- duration (opt)    : seconds; extends the buff's expiration on cast
+--
+-- To add a new modifier, append an entry below. All ranks of the same
+-- spell are listed separately since they have different spellIds.
+-- ================================================================
+STACK_MODIFIERS = {
+  -- Mage --
+  [11366] = { -- Pyroblast rk 1
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [12505] = {  -- Pyroblast rk 2
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [12522] = {  -- Pyroblast rk 3
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [12523] = {  -- Pyroblast rk 4
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [12524] = {  -- Pyroblast rk 5
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [12525] = {  -- Pyroblast rk 6
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [12526] = {  -- Pyroblast rk 7
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+  [18809] = {  -- Pyroblast rk 8
+    modifiedBuffName = "Hot Streak",
+    stackChange = -5
+  },
+
+  -- Shaman --
+  [51387] = {  -- Lightning Strike rk 1
+    modifiedBuffName = "Lightning Shield",
+    stackChange = -1
+  },
+  [52420] = {  -- Lightning Strike rk 2
+    modifiedBuffName = "Lightning Shield",
+    stackChange = -1
+  },
+  [52422] = {  -- Lightning Strike rk 3
+    modifiedBuffName = "Lightning Shield",
+    stackChange = -1
+  },
+
+  -- Druid --
+  [5176] = {  -- Wrath rk 1
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [5177] = {  -- Wrath rk 2
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [5178] = {  -- Wrath rk 3
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [5179] = {  -- Wrath rk 4
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [5180] = {  -- Wrath rk 5
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [6780] = {  -- Wrath rk 6
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [8905] = {  -- Wrath rk 7
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [9912] = {  -- Wrath rk 8
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [45967] = {  -- Wrath rk 9
+    modifiedBuffName = "Natural Boon",
+    stackChange = -1
+  },
+  [2912] = {  -- Starfire rk 1
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+  [8949] = {  -- Starfire rk 2
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+  [8950] = {  -- Starfire rk 3
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+  [8951] = {  -- Starfire rk 4
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+  [9875] = {  -- Starfire rk 5
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+  [9876] = {  -- Starfire rk 6
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+  [25298] = {  -- Starfire rk 7
+    modifiedBuffName = "Astral Boon",
+    stackChange = -1
+  },
+}

@@ -87,8 +87,14 @@ local function _AnyTrackPetInAuraConditions(list)
     return false
   end
 
-  local _, cond
-  for _, cond in pairs(list) do
+  -- auraConditions is a numeric array; a numeric for skips the generic
+  -- next() dispatch that pairs() does on every iteration. Called from
+  -- _ScanTrackPetUsage, which runs up to once per second per active
+  -- trackpet icon, so the cheap path is worth it.
+  local i, cond
+  local n = table.getn(list)
+  for i = 1, n do
+    cond = list[i]
     if type(cond) == "table" and cond.trackpet == true then
       return true
     end
@@ -533,8 +539,9 @@ f:RegisterEvent("PLAYER_DEAD")
 
 f:SetScript("OnEvent", function()
   local evt = event
-  local unit = arg1
-  local guid = arg1
+  -- arg1 carries "player" for UNIT_PET but a GUID for the *OTHER events.
+  -- One variable serves both roles.
+  local unitOrGuid = arg1
   local spellId = arg3
   local stackCount = tonumber(arg4) or 0
   local needsEval = false
@@ -553,7 +560,7 @@ f:SetScript("OnEvent", function()
     return
   elseif evt == "UNIT_PET_GUID" then
     local isPlayer = arg2
-    if isPlayer == 1 and guid then
+    if isPlayer == 1 and unitOrGuid then
       local currentPetGuid = GetUnitGUID and GetUnitGUID("pet") or nil
       if currentPetGuid ~= DoitePetAuras.petGuid then
         _ResetForPetChange()
@@ -561,12 +568,12 @@ f:SetScript("OnEvent", function()
       end
     end
   elseif evt == "UNIT_PET" then
-    if unit == "player" then
+    if unitOrGuid == "player" then
       _ResetForPetChange()
       needsEval = true
     end
   elseif evt == "BUFF_ADDED_OTHER" or evt == "DEBUFF_ADDED_OTHER" then
-    if DoitePetAuras.petGuid and guid and guid == DoitePetAuras.petGuid then
+    if DoitePetAuras.petGuid and unitOrGuid and unitOrGuid == DoitePetAuras.petGuid then
       if stackCount <= 0 then
         stackCount = 1
       end
@@ -574,12 +581,12 @@ f:SetScript("OnEvent", function()
       needsEval = true
     end
   elseif evt == "BUFF_REMOVED_OTHER" or evt == "DEBUFF_REMOVED_OTHER" then
-    if DoitePetAuras.petGuid and guid and guid == DoitePetAuras.petGuid then
+    if DoitePetAuras.petGuid and unitOrGuid and unitOrGuid == DoitePetAuras.petGuid then
       _SetAuraBySpellId(spellId, stackCount, evt == "DEBUFF_REMOVED_OTHER")
       needsEval = true
     end
   elseif evt == "UNIT_DIED" then
-    if DoitePetAuras.petGuid and guid and guid == DoitePetAuras.petGuid then
+    if DoitePetAuras.petGuid and unitOrGuid and unitOrGuid == DoitePetAuras.petGuid then
       DoitePetAuras.petGuid = nil
       _ClearMap(DoitePetAuras.buffs)
       _ClearMap(DoitePetAuras.debuffs)

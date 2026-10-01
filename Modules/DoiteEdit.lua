@@ -1294,6 +1294,49 @@ function DoiteConditions_Show(key)
     end)
     condFrame.editCloseBtn = editCloseBtn
 
+    -- Free drag by the header ("title bar"). Classic StartMoving /
+    -- StopMovingOrSizing pair. Position is NOT persisted: it resets on
+    -- /reload because it is never written to SavedVariables.
+    --
+    -- On the very first drag the frame is still anchored to
+    -- DoiteAurasFrame (see SetPoint above); that relative anchor is
+    -- dropped and replaced with an absolute UIParent-relative one at
+    -- the frame's current on-screen spot. Without this, StartMoving()
+    -- would keep following the main settings window.
+    --
+    -- The handle spans the top strip only; the close button is excluded
+    -- (TOPLEFT of handle -> TOPLEFT of frame, TOPRIGHT -> TOPLEFT of
+    -- editCloseBtn), so X keeps its own click.
+    local editDragBar = CreateFrame("Frame", nil, condFrame)
+    editDragBar:SetPoint("TOPLEFT", condFrame, "TOPLEFT", 0, 0)
+    editDragBar:SetPoint("TOPRIGHT", editCloseBtn, "TOPLEFT", 0, 5)
+    editDragBar:SetHeight(34)
+    editDragBar:EnableMouse(true)
+    editDragBar:SetFrameLevel(condFrame:GetFrameLevel() + 3)
+
+    condFrame:SetMovable(true)
+    if condFrame.SetClampedToScreen then
+        condFrame:SetClampedToScreen(true)
+    end
+
+    editDragBar:SetScript("OnMouseDown", function()
+        if condFrame._daAnchorDetached ~= true then
+            local l, t = condFrame:GetLeft(), condFrame:GetTop()
+            if l and t then
+                condFrame:ClearAllPoints()
+                -- UIParent's BOTTOMLEFT is the screen origin in WoW 1.12,
+                -- so this drops the frame at its current screen position
+                -- with no relative-parent dependency.
+                condFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+            end
+            condFrame._daAnchorDetached = true
+        end
+        condFrame:StartMoving()
+    end)
+    editDragBar:SetScript("OnMouseUp", function()
+        condFrame:StopMovingOrSizing()
+    end)
+
     -- When the conditions editor hides by any means, drop the edit override
     condFrame:SetScript("OnHide", function()
 
@@ -1616,11 +1659,22 @@ function DoiteConditions_Show(key)
       end
 
       d.customFunctionSource = source
-      d._daCustomCompiled = fn
+      -- `data._daCustomCompiled` is intentionally NOT set anymore: the
+      -- compiled function lives in a runtime-only map
+      -- (DoiteConditions._customCompiledByKey), keyed by icon. Only the
+      -- source string is persisted so the SV table stays pure data.
       d._daCustomCompiledSrc = source
-      -- Runtime-only per-key state: not saved to SavedVariables.
+
+      -- Force DoiteConditionsCustom to recompile on next eval: drop the
+      -- cached compiled function for this key. Without this, the cached
+      -- function from the previous save would still be returned because
+      -- _daCustomCompiledSrc matches the freshly-written source string,
+      -- and edits would only take effect after /reload.
       local dc = _G["DoiteConditions"]
       if dc then
+        if dc._customCompiledByKey then
+          dc._customCompiledByKey[currentKey] = nil
+        end
         dc._customStateByKey = dc._customStateByKey or {}
         dc._customStateByKey[currentKey] = {}
       end

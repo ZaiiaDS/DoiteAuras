@@ -213,7 +213,13 @@ local function _EnsureAbilityTexture(frame, data)
   if not frame or not frame.icon or not data then
     return
   end
-  if frame.icon:GetTexture() then
+  -- Caller may have already written the QuestionMark placeholder before
+  -- invoking us (see ApplyVisuals), so a simple truthy check on the
+  -- current texture would early-return and the real spell icon would
+  -- never resolve until SPELLS_CHANGED. Only skip when a real texture
+  -- is already in place.
+  local curTex = frame.icon:GetTexture()
+  if curTex and curTex ~= "Interface\\Icons\\INV_Misc_QuestionMark" then
     return
   end
 

@@ -1598,13 +1598,11 @@ do
   local function VfxCond_GetListForType(typeKey)
     local ck = _G["DoiteEdit_CurrentKey"]
     if not ck then
-      DEFAULT_CHAT_FRAME:AddMessage("|cffff0000GetList: No currentKey|r")
       return nil
     end
 
     local d = _EnsureDBEntry(ck)
     if not d then
-      DEFAULT_CHAT_FRAME:AddMessage("|cffff0000GetList: EnsureDBEntry failed for '"..tostring(ck).."'|r")
       return nil
     end
 
@@ -2579,7 +2577,6 @@ do
 
     local list = VfxCond_GetListForType(mgr.typeKey)
     if not list then
-      DEFAULT_CHAT_FRAME:AddMessage("|cffff0000VfxCond_OnAdd: list is nil for type "..tostring(mgr.typeKey).."|r")
       return
     end
 

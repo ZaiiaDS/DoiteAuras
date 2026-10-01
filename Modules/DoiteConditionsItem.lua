@@ -633,7 +633,11 @@ local function _EvaluateItemCoreState(data, c)
                   slotC._c = memC
                 end
 
-                local key = tostring(slotC.itemId or 0) .. ":" .. tostring(teId)
+                -- Composite key for the enchant-charge/expiry memories.
+                -- Named teKey (not key) so it does not shadow the outer
+                -- `local key = data and data.key` used for
+                -- _TrinketFirstMemory above.
+                local teKey = tostring(slotC.itemId or 0) .. ":" .. tostring(teId)
 
                 local prevTeId = slotC.tempEnchantId
                 if prevTeId ~= teId then
@@ -656,12 +660,12 @@ local function _EvaluateItemCoreState(data, c)
                   end
 
                   slotC._msLeft = msLeft
-                  memE[key] = slotC.endTime
+                  memE[teKey] = slotC.endTime
                 else
                   slotC._msLeft = nil
 
                   if (not slotC.endTime) or (slotC.endTime <= now) then
-                    local endT = memE[key]
+                    local endT = memE[teKey]
                     if endT and endT > now then
                       slotC.endTime = endT
                     else
@@ -674,9 +678,9 @@ local function _EvaluateItemCoreState(data, c)
                   local ch = tonumber(info.tempEnchantmentCharges) or 0
                   if ch < 0 then ch = 0 end
                   slotC.charges = ch
-                  memC[key] = ch
+                  memC[teKey] = ch
                 else
-                  local ch = memC[key]
+                  local ch = memC[teKey]
                   if ch == nil then ch = 0 end
                   slotC.charges = ch
                 end

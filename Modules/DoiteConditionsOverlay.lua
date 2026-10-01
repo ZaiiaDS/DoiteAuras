@@ -2,20 +2,20 @@
 -- DoiteConditionsOverlay.lua
 -- Overlay text rendering for DoiteAuras icons.
 --
--- Функции в этом файле:
---   _DA_NumToStr                            - кэш число -> строка
---   _DA_ResolveFont                         - выбор шрифта (override vs global)
---   _FmtRem                                 - формат remaining time (h/m/s/tenths)
---   DoiteConditions._UpdateOverlayForFrame  - рендер времени и стаков
+-- Functions in this file:
+--   _DA_NumToStr                            - number -> string cache
+--   _DA_ResolveFont                         - font pick (override vs global)
+--   _FmtRem                                 - remaining-time formatter (h/m/s/tenths)
+--   DoiteConditions._UpdateOverlayForFrame  - render remaining time + stacks
 --
--- Загружается ПОСЛЕ DoiteConditions.lua (см. DoiteAuras.toc).
--- Использует helper-функции, экспортированные через _G из DoiteConditions.lua.
+-- Loaded AFTER DoiteConditions.lua (see DoiteAuras.toc).
+-- Uses helper functions exported via _G from DoiteConditions.lua.
 ---------------------------------------------------------------
 
 local DoiteConditions = _G["DoiteConditions"] or {}
 _G["DoiteConditions"] = DoiteConditions
 
--- Aliases для функций, экспортированных из DoiteConditions.lua
+-- Aliases for functions exported from DoiteConditions.lua
 local _DA_GetTargetFacts              = _G["DoiteConditions_GetTargetFacts"]
 local _PlayerAuraRemainingSeconds     = _G["DoiteConditions_PlayerAuraRemainingSeconds"]
 local _DoiteTrackAuraRemainingSeconds = _G["DoiteConditions_DoiteTrackAuraRemainingSeconds"]
@@ -27,10 +27,10 @@ local _GetAuraStacksOnUnit            = _G["DoiteConditions_GetAuraStacksOnUnit"
 local _AbilityCooldownByName          = _G["DoiteConditions_GetAbilityCooldown"]
 local _EvaluateItemCoreState          = DoiteConditions._EvaluateItemCoreState
 
--- Глобалы, используемые ниже
+-- Globals used below
 local DoitePetAuras    = _G["DoitePetAuras"]
 
--- ====== Кэш число -> строка ======
+-- ====== Number -> string cache ======
 local _DA_NumStrCache = {}
 local function _DA_NumToStr(n)
   if not n then
@@ -50,7 +50,7 @@ local function _DA_ResolveFont(iconVal, globalVal)
   return globalVal
 end
 
--- ====== Форматирование remaining time ======
+-- ====== Remaining-time formatting ======
 local function _FmtRem(remSec)
   if not remSec or remSec <= 0 then
     return nil
@@ -76,8 +76,8 @@ end
 
 ---------------------------------------------------------------
 -- DoiteConditions._UpdateOverlayForFrame
--- Центральный апдейтер overlay-текста: remaining-time + stacks.
--- Вызывается из ApplyVisuals и DoiteConditions_UpdateTimeText.
+-- Central overlay-text updater: remaining time + stacks.
+-- Called from ApplyVisuals and DoiteConditions_UpdateTimeText.
 ---------------------------------------------------------------
 function DoiteConditions._UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
   if not frame or not dataTbl then
@@ -222,28 +222,32 @@ function DoiteConditions._UpdateOverlayForFrame(frame, key, dataTbl, slideActive
       local remShown, durShown = nil, nil
       local remIsProc = false
 
+      -- Both the real cooldown timer and the proc-window timer live under
+      -- the "Icon text: Time remaining" flag. Without this gate a proc
+      -- (Overpower / Revenge / Riposte / etc.) would show its timer even
+      -- when the user never enabled text on that icon.
       if ca.textTimeRemaining == true then
         if remCD and remCD > 0 and _ShowAbilityTime(ca, remCD, durCD, slideActive) then
           remShown = remCD
           durShown = durCD
         end
-      end
 
-      if (not remShown) and spellName
-          and (ca.mode == "usable" or ca.mode == "notcd" or ca.mode == "nocdoncd") then
-        local procDur = _ProcWindowDuration(spellName)
-        if procDur then
-          local realCd = false
-          if remCD and remCD > 0 and durCD and durCD > 1.6 then
-            realCd = true
-          end
+        if (not remShown) and spellName
+            and (ca.mode == "usable" or ca.mode == "notcd" or ca.mode == "nocdoncd") then
+          local procDur = _ProcWindowDuration(spellName)
+          if procDur then
+            local realCd = false
+            if remCD and remCD > 0 and durCD and durCD > 1.6 then
+              realCd = true
+            end
 
-          if not realCd then
-            local remProc = _ProcWindowRemaining(spellName)
-            if remProc and remProc > 0 then
-              remShown = remProc
-              durShown = procDur
-              remIsProc = true
+            if not realCd then
+              local remProc = _ProcWindowRemaining(spellName)
+              if remProc and remProc > 0 then
+                remShown = remProc
+                durShown = procDur
+                remIsProc = true
+              end
             end
           end
         end

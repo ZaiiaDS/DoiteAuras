@@ -603,11 +603,33 @@ function DoiteGroup.ApplyGroupLayout(candidates)
     end
   end
 
-  -- remove groups not present this pass (keeps Published table clean)
+  -- Remove groups not present this pass. Two-pass: collect dead keys
+  -- first, delete after. Removing keys inside pairs() is UB in Lua 5.0
+  -- and can leave stale group buckets in the published layout.
+  local dead = DoiteGroup._tmpDeadGroups
+  if not dead then
+    dead = {}
+    DoiteGroup._tmpDeadGroups = dead
+  else
+    local i = 1
+    while dead[i] ~= nil do
+      dead[i] = nil
+      i = i + 1
+    end
+  end
+  local dn = 0
+  local g
   for g in pairs(groups) do
     if not seen[g] then
-      groups[g] = nil
+      dn = dn + 1
+      dead[dn] = g
     end
+  end
+  local di = 1
+  while di <= dn do
+    groups[dead[di]] = nil
+    dead[di] = nil
+    di = di + 1
   end
 
   for gName, list in pairs(groups) do
@@ -1043,21 +1065,68 @@ function DoiteGroup.CleanupDanglingGroupData()
     end
   end
 
+  -- Two-pass prune. Removing keys inside pairs() is UB in Lua 5.0 and
+  -- can leave stale groupSort / groupFixed / bucketCollapsed entries
+  -- behind after a group is deleted.
   local function pruneGroupMap(t)
     if not t then return end
+    local scratch = _G["DoiteGroup_PruneScratch"]
+    if not scratch then
+      scratch = {}
+      _G["DoiteGroup_PruneScratch"] = scratch
+    else
+      local i = 1
+      while scratch[i] ~= nil do
+        scratch[i] = nil
+        i = i + 1
+      end
+    end
+    local cnt = 0
+    local k
     for k in pairs(t) do
-      if not usedGroups[k] then t[k] = nil end
+      if not usedGroups[k] then
+        cnt = cnt + 1
+        scratch[cnt] = k
+      end
+    end
+    local i = 1
+    while i <= cnt do
+      t[scratch[i]] = nil
+      scratch[i] = nil
+      i = i + 1
     end
   end
   pruneGroupMap(db.groupSort)
   pruneGroupMap(db.groupFixed)
   pruneGroupMap(db.bucketCollapsed)
 
+  -- Same two-pass rule: cannot nil-out keys while pairs() is walking
+  -- the table on Lua 5.0.
   if db.bucketDisabled then
+    local scratch = _G["DoiteGroup_PruneScratch"]
+    if not scratch then
+      scratch = {}
+      _G["DoiteGroup_PruneScratch"] = scratch
+    else
+      local i = 1
+      while scratch[i] ~= nil do
+        scratch[i] = nil
+        i = i + 1
+      end
+    end
+    local cnt = 0
+    local k
     for k in pairs(db.bucketDisabled) do
       if not usedGroups[k] and not usedCategories[k] then
-        db.bucketDisabled[k] = nil
+        cnt = cnt + 1
+        scratch[cnt] = k
       end
+    end
+    local i = 1
+    while i <= cnt do
+      db.bucketDisabled[scratch[i]] = nil
+      scratch[i] = nil
+      i = i + 1
     end
   end
 

@@ -19,6 +19,25 @@
 local DoiteConditions = _G["DoiteConditions"] or {}
 _G["DoiteConditions"] = DoiteConditions
 
+-- Compiled functions live in a runtime-only map keyed by icon, NOT on the
+-- per-icon data table: `data` lives inside DoiteAurasDB (SavedVariables),
+-- and Lua functions cannot be serialized. Storing them on `data` works
+-- today only because the client silently drops them on save, and forces
+-- a recompile on the next login. Keeping them out of SV is cleaner and
+-- removes any dependence on that quirk. `_daCustomCompiledSrc` (a string)
+-- stays on `data` so we can tell on reload whether the cached function is
+-- still up to date.
+local function _DoiteCustomCompiledMap()
+  local DC = _G["DoiteConditions"]
+  if not DC then
+    return nil
+  end
+  if not DC._customCompiledByKey then
+    DC._customCompiledByKey = {}
+  end
+  return DC._customCompiledByKey
+end
+
 local function _DoiteCustomCompileForData(key, data)
   if type(data) ~= "table" then
     return nil, "Invalid custom data entry."
@@ -30,8 +49,11 @@ local function _DoiteCustomCompileForData(key, data)
     data.customFunctionSource = src
   end
 
-  if data._daCustomCompiled and data._daCustomCompiledSrc == src then
-    return data._daCustomCompiled, nil
+  local compiledMap = _DoiteCustomCompiledMap()
+  local cachedFn = compiledMap and key and compiledMap[key] or nil
+
+  if cachedFn and data._daCustomCompiledSrc == src then
+    return cachedFn, nil
   end
 
   local wrapped = "return function(data)\n" .. src .. "\nend"
@@ -48,7 +70,9 @@ local function _DoiteCustomCompileForData(key, data)
     return nil, "Compiled custom source is not callable."
   end
 
-  data._daCustomCompiled = fn
+  if compiledMap and key then
+    compiledMap[key] = fn
+  end
   data._daCustomCompiledSrc = src
   data._daCustomCompileError = nil
   return fn, nil

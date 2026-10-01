@@ -94,11 +94,6 @@ local str_gsub = string.gsub
 -- Sound helpers + spell-name/texture cache + icon-frame getter moved to
 -- Modules/DoiteConditionsIcons.lua. Local aliases added at the top of this file.
 
-local function _Now()
-
-  return (GetTime and GetTime()) or 0
-end
-
 -- Defined in Modules/DoiteConditionsTarget.lua (loaded before this file).
 -- Cached as a file-local to keep call sites cheap.
 local _NormalizeTargetField = _G["DoiteConditions_NormalizeTargetField"]
@@ -226,8 +221,8 @@ end
 
 local DG = _G["DoiteGlow"]
 
--- ВНИМАНИЕ: DoiteConditions.lua уже на пределе 200 локалов в Lua 5.0.
--- Поэтому новые функции здесь объявляем как методы таблицы, а не как file-scope locals.
+-- NOTE: DoiteConditions.lua is at Lua 5.0's 200-file-local limit.
+-- New helpers must be declared as table methods, not file-scope locals.
 DoiteConditions._RefreshEditStateCache = function()
   local testAll = (_G["DoiteAuras_TestAll"] == true)
   if testAll then
@@ -258,10 +253,10 @@ DoiteConditions._RefreshEditStateCache = function()
   DoiteConditions._editKeyCached  = open and cur or nil
 end
 
--- ВНИМАНИЕ: файл DoiteConditions.lua уже на пределе 200 файловых локалов.
--- Объявляем эти две вспомогательные функции глобально, чтобы не расходовать слоты.
--- Значения кешируются ниже в DoiteConditions._RefreshEditStateCache,
--- чтобы не читать _G на каждой иконке на каждом тике.
+-- NOTE: DoiteConditions.lua is at Lua 5.0's 200-file-local limit.
+-- The two helpers below are declared as globals to avoid burning
+-- local slots. Their values are cached by _RefreshEditStateCache
+-- so per-icon, per-tick code never has to touch _G.
 DoiteConditions._editOpenCached = false
 DoiteConditions._editKeyCached  = nil
 
@@ -387,6 +382,12 @@ _G.DoiteConditions_CleanupKey = function(key)
   end
   if DoiteConditions and DoiteConditions._customStateByKey then
     DoiteConditions._customStateByKey[key] = nil
+  end
+  -- Compiled custom functions live in a runtime-only map (not SV);
+  -- drop the entry so the map cannot accumulate functions for keys
+  -- that no longer exist.
+  if DoiteConditions and DoiteConditions._customCompiledByKey then
+    DoiteConditions._customCompiledByKey[key] = nil
   end
   -- Shatter manager may still have pieces and a hidden icon texture
   -- attached to this key; release them so they are not orphaned.
@@ -1094,7 +1095,8 @@ local function _DA_GetTargetFacts()
   return tf
 end
 
--- Expose internal helpers for DoiteConditionsOverlay.lua (loaded after this file)
+-- Expose internal helpers for modules loaded after this file
+-- (DoiteConditionsOverlay, DoiteAuras.lua, etc.).
 _G["DoiteConditions_GetIconFrame"]                  = _GetIconFrame
 _G["DoiteConditions_GetTargetFacts"]                = _DA_GetTargetFacts
 _G["DoiteConditions_PlayerAuraRemainingSeconds"]    = _PlayerAuraRemainingSeconds
@@ -1301,30 +1303,22 @@ local _hasAnyTargetMods_Ability = false
 local _hasAnyTargetMods_Aura = false
 local _hasAnyCustomLogic = false
 
-local function _IconHasTargetMods_AbilityOrItem(data)
+-- Single source of truth: does this icon read targetDistance / targetUnitType?
+-- bucketA is tried first; bucketB is an optional fallback (Ability and Item
+-- historically shared the same flag, and old saves may carry both buckets).
+local function _IconHasTargetMods(data, bucketA, bucketB)
   if not data or not data.conditions then
     return false
   end
-  local c = data.conditions.ability or data.conditions.item
+  local c = data.conditions[bucketA]
+  if not c and bucketB then
+    c = data.conditions[bucketB]
+  end
   if not c then
     return false
   end
-
   local td = _NormalizeTargetField(c.targetDistance)
   local tu = _NormalizeTargetField(c.targetUnitType)
-
-  return (td ~= nil) or (tu ~= nil)
-end
-
-local function _IconHasTargetMods_Aura(data)
-  if not data or not data.conditions or not data.conditions.aura then
-    return false
-  end
-  local c = data.conditions.aura
-
-  local td = _NormalizeTargetField(c.targetDistance)
-  local tu = _NormalizeTargetField(c.targetUnitType)
-
   return (td ~= nil) or (tu ~= nil)
 end
 
@@ -1390,11 +1384,11 @@ local function _RebuildTargetModsFlags()
         end
 
         if (data.type == "Ability" or data.type == "Item")
-            and _IconHasTargetMods_AbilityOrItem(data) then
+            and _IconHasTargetMods(data, "ability", "item") then
           _hasAnyTargetMods_Ability = true
         end
         if (data.type == "Buff" or data.type == "Debuff")
-            and _IconHasTargetMods_Aura(data) then
+            and _IconHasTargetMods(data, "aura") then
           _hasAnyTargetMods_Aura = true
         end
         if _hasAnyTargetMods_Ability and _hasAnyTargetMods_Aura and DoiteConditions and DoiteConditions._hasAnyItemLogic then
@@ -1458,11 +1452,11 @@ local function _RebuildTargetModsFlags()
         end
 
         if (data.type == "Ability" or data.type == "Item")
-            and _IconHasTargetMods_AbilityOrItem(data) then
+            and _IconHasTargetMods(data, "ability", "item") then
           _hasAnyTargetMods_Ability = true
         end
         if (data.type == "Buff" or data.type == "Debuff")
-            and _IconHasTargetMods_Aura(data) then
+            and _IconHasTargetMods(data, "aura") then
           _hasAnyTargetMods_Aura = true
         end
         if _hasAnyTargetMods_Ability and _hasAnyTargetMods_Aura and DoiteConditions and DoiteConditions._hasAnyItemLogic then
@@ -1494,9 +1488,9 @@ local function _EvaluateVfxConditions(data)
     return false, false, false, 0
   end
 
-  -- Fast path: скипаем если для иконки нет VFX-условий.
-  -- _daHasVfx выставляется при добавлении vfxConditions; если nil — значит либо ещё
-  -- не считали, либо их нет. Проверяем оба бакета, чтобы избежать ложного скипа.
+  -- Fast path: skip when the icon has no VFX conditions at all.
+  -- _daHasVfx is set when vfxConditions are added; nil means "not yet
+  -- computed". Both buckets are checked to avoid a false skip.
   if data._daHasVfx == nil then
     local hasVfx = false
     local ab = data.conditions.ability
@@ -2908,22 +2902,24 @@ function DoiteConditions._HandleAbilityShatter(key, ca, dataTbl, sliderGuardOk)
     return false, false, false, 0, 0, 1
   end
 
-  -- Already-running short-circuit. Once a shatter is playing, do NOT
-  -- interrupt it because of a transient guard flip. Casting another
-  -- ability mid-flight can momentarily flip aura / form / weapon
-  -- conditions, which used to stop the assembly and leave the icon
-  -- hidden until the cooldown ended (where it then "just appeared").
-  -- The shatter's own tick will call _Finish when its endTime arrives.
-  if ShatterMgr:IsActive(key) then
-    -- Repair _fired in case something cleared it; the running shatter
-    -- must stay claimed for this CD cycle.
-    ShatterMgr._fired[key] = true
+  -- Form / weapon / aura / target guard. Checked BEFORE the
+  -- already-running short-circuit so losing a NON-MODE condition
+  -- (target, distance, HP, power, etc.) stops the assembly mid-
+  -- flight, not only at start. Stop is idempotent and returns its
+  -- pieces / particles to the pool.
+  if sliderGuardOk == false then
+    if ShatterMgr:IsActive(key) then
+      ShatterMgr:Stop(key)
+      ShatterMgr._fired[key] = nil
+      return false, true, false, 0, 0, 1
+    end
     return false, false, false, 0, 0, 1
   end
 
-  -- Form / weapon / aura guard. Only reached on the *start* path -- a
-  -- running shatter has already returned above.
-  if sliderGuardOk == false then
+  -- Already-running short-circuit. Reached only when the guard is OK;
+  -- the branch above handles the "should stop now" case.
+  if ShatterMgr:IsActive(key) then
+    ShatterMgr._fired[key] = true
     return false, false, false, 0, 0, 1
   end
 
@@ -3253,8 +3249,21 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey, fade, fadeAlpha)
     local ca = dataTbl.conditions.ability
     local startedSlide, stoppedSlide
 
+    -- Slider / shatter must obey every NON-MODE condition, not just
+    -- form / weapon / aura. _daSoundGate is set in CheckAbilityConditions
+    -- right before mode is applied, so it is true both while the icon
+    -- is on cooldown and while it is ready -- which is exactly what
+    -- lets the slider run during CD -- but it flips false whenever any
+    -- OTHER condition fails (target, distance, HP, power, form, etc.).
+    -- Combining it with _daSliderGuard suppresses the animation in
+    -- those cases.
+    local sliderGate = dataTbl._daSliderGuard
+    if sliderGate ~= false and dataTbl._daSoundGate == false then
+      sliderGate = false
+    end
+
     -- Lightweight wrapper: heavy logic lives in _HandleAbilitySlider
-    startedSlide, stoppedSlide, slideActive, dx, dy, slideAlpha = _HandleAbilitySlider(key, ca, dataTbl, dataTbl._daSliderGuard)
+    startedSlide, stoppedSlide, slideActive, dx, dy, slideAlpha = _HandleAbilitySlider(key, ca, dataTbl, sliderGate)
 
     -- === immediate group reflow on slide start/stop ===
     if (startedSlide or stoppedSlide) and DoiteGroup and DoiteGroup.ApplyGroupLayout then
@@ -3380,33 +3389,30 @@ function DoiteConditions:ApplyVisuals(key, show, glow, grey, fade, fadeAlpha)
     local isGrouped = (dataTbl and dataTbl.group and dataTbl.group ~= "" and dataTbl.group ~= "no")
     local isLeader = (dataTbl and dataTbl.isLeader == true)
 
-    -- Apply position and alpha (no stutter:set exact coordinates each paint)
-    do
-      -- Do not force position if user is dragging this frame
-      if not frame._daDragging then
-          -- When sliding: apply transient movement to everyone (leaders + followers)
-          if slideActive then
+    -- Do not force position if user is dragging this frame
+    if not frame._daDragging then
+        -- When sliding: apply transient movement to everyone (leaders + followers)
+        if slideActive then
+          frame:ClearAllPoints()
+          frame:SetPoint("CENTER", UIParent, "CENTER", baseX + dx, baseY + dy)
+          frame:SetAlpha(slideAlpha)
+        else
+          -- When not sliding: do NOT force followers' points here.
+          if not (isGrouped and not isLeader) then
             frame:ClearAllPoints()
-            frame:SetPoint("CENTER", UIParent, "CENTER", baseX + dx, baseY + dy)
-            frame:SetAlpha(slideAlpha)
+            frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
+            frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
           else
-            -- When not sliding: do NOT force followers' points here.
-            if not (isGrouped and not isLeader) then
+            -- Followers:
+            -- Only re-anchor having a computed group position for this key.
+            if hasGroupPos then
               frame:ClearAllPoints()
               frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
-              frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
-            else
-              -- Followers:
-              -- Only re-anchor having a computed group position for this key.
-              if hasGroupPos then
-                frame:ClearAllPoints()
-                frame:SetPoint("CENTER", UIParent, "CENTER", baseX, baseY)
-              end
-              -- If !hasGroupPos: do not touch points this tick; avoid snapping back to original x/y.
-              frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
             end
+            -- If !hasGroupPos: do not touch points this tick; avoid snapping back to original x/y.
+            frame:SetAlpha((dataTbl and dataTbl.alpha) or 1)
           end
-      end
+        end
     end
     -- === Overlay Text: cooldown remaining + stacks (forced above glow) ===
     DoiteConditions._UpdateOverlayForFrame(frame, key, dataTbl, slideActive)
@@ -3857,9 +3863,9 @@ function DoiteConditions_OnUpdate(dt)
   -- Coalesce any pending flag rebuilds (from RequestEvaluate) into one pass.
   _DoiteConditions_FlushDirtyFlags()
 
-  -- 0.5s heartbeat for ability/item time-based logic (cooldown end needs reevaluation).
-  -- Heartbeat for ability/item time-based logic (cooldown end needs reevaluation). When a temp weapon enchant is in its last 60s, refresh more frequently so enchant-based remaining/show/hide reacts on a tighter cadence. When a temp weapon enchant is in its last 60s, refresh more frequently so enchant-based remaining/show/hide reacts on a tighter cadence.
-  -- 0.5s heartbeat for ability/item time-based logic (cooldown end needs reevaluation).
+  -- 0.5s heartbeat for ability/item time-based logic (cooldown end
+  -- needs reevaluation). Temp weapon enchant near expiry uses its own
+  -- fast tick block below instead of this heartbeat.
   _timeEvalAccum = _timeEvalAccum + dt
   if _timeEvalAccum >= 0.5 then
     _timeEvalAccum = 0
@@ -3879,9 +3885,9 @@ function DoiteConditions_OnUpdate(dt)
 
     if te then
       local now = GetTime()
-      local mh = te[16]
-      local oh = te[17]
-      local rg = te[18]
+      local mh = te[INV_SLOT_MAINHAND]
+      local oh = te[INV_SLOT_OFFHAND]
+      local rg = te[INV_SLOT_RANGED]
 
       _teFastActive = false
 
@@ -4013,9 +4019,9 @@ DoiteConditions._flagsDirty = true
 ---------------------------------------------------------------
 -- Event handling + smoother updates
 ---------------------------------------------------------------
--- ВНИМАНИЕ: DoiteConditions.lua уже на лимите 200 файловых локалов (Lua 5.0).
--- Не создаём новый local — используем глобал, который автоматически
--- устанавливается вызовом CreateFrame("Frame", "DoiteConditionsEventFrame").
+-- NOTE: DoiteConditions.lua is at Lua 5.0's 200-file-local limit.
+-- No new local for the event frame; CreateFrame with a name
+-- installs it as a global automatically.
 CreateFrame("Frame", "DoiteConditionsEventFrame")
 DoiteConditionsEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 DoiteConditionsEventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")

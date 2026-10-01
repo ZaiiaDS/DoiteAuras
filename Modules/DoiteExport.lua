@@ -543,10 +543,15 @@ local function DE_ParseExportString(str)
 
   -- Structural validation: DA1/DA2 bodies are always a single
   -- "return { ... }" table literal produced by DE_SerializeExport.
-  -- Reject anything else. Blocks hand-crafted strings like
-  -- "evil(); return {...}" that would execute arbitrary code on
-  -- loadstring() while still passing the custom-code confirmation
-  -- dialog (which only inspects customFunctionSource inside the pkg).
+  -- Reject anything else with a lighter check: the body must start
+  -- with `return` followed by `{`. This blocks obvious injections
+  -- like "evil(); return {...}" but is NOT sufficient on its own --
+  -- a payload like `return {}, evil()` passes this check (first char
+  -- after `return` is `{`) and would still execute evil() during the
+  -- return-value evaluation. The actual barrier is the setfenv(fn, {})
+  -- sandbox below, which removes access to every global symbol
+  -- (os, loadstring, getfenv, print, ...) so no code execution is
+  -- possible from a crafted body.
   do
     local trimmed = gsub(body, "^%s+", "")
     if strsub(trimmed, 1, 6) ~= "return" then
@@ -562,6 +567,23 @@ local function DE_ParseExportString(str)
   local fn, err = loadstring(body)
   if not fn then
     return nil, "load_error: " .. tostring(err)
+  end
+
+  -- Sandbox: the body is pure data (a single table literal produced by
+  -- DE_SerializeExport), so it never needs any global symbol. Giving
+  -- the chunk an empty environment blocks both classic vectors:
+  --   1) top-level calls, e.g. `return {}, os.execute("...")`
+  --   2) function-constructor escapes,
+  --      e.g. `return {}, loadstring("...")()`
+  -- The leading-`return {` validation above only checks the FIRST
+  -- characters of the body; a payload like `return {}, evil()`
+  -- passes it (first char after `return` is `{`), and Lua evaluates
+  -- every expression in a return list before returning, so `evil()`
+  -- would still run. Sandboxing removes the escape hatch entirely:
+  -- inside {}, getfenv/loadstring/os/print are all nil, so no global
+  -- access is possible.
+  if setfenv then
+    setfenv(fn, {})
   end
 
   local ok, pkg = pcall(fn)

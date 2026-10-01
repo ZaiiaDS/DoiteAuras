@@ -180,6 +180,31 @@ function DoiteShatter.ResetParam(key)
 end
 
 -- ---------------------------------------------------------------
+-- Dynamic particle cap (performance policy, not a visual tunable).
+--
+-- When many shatters run at once the per-frame cost grows linearly
+-- with the total particle count. Cap reduces the particle count for
+-- NEW shatters only, once the active-shatter count reaches a
+-- threshold; already-running animations keep their original count so
+-- there is no mid-flight visual pop.
+--
+-- Lives in DoiteAurasDB.shatterCap, NOT in DoiteAurasDB.shatter, so
+-- shatter presets and export strings never carry these values.
+-- ---------------------------------------------------------------
+function DoiteShatter.GetCapCfg()
+  local db = _G["DoiteAurasDB"]
+  if not db then
+    return { enabled = false, threshold = 4, count = 15 }
+  end
+  db.shatterCap = db.shatterCap or {}
+  local c = db.shatterCap
+  if c.enabled   == nil then c.enabled   = false end
+  if c.threshold == nil then c.threshold = 4     end
+  if c.count     == nil then c.count     = 15    end
+  return c
+end
+
+-- ---------------------------------------------------------------
 -- Presets. Stored in DoiteAurasDB.shatterPresets[name] as a plain
 -- snapshot of every tunable key (see DEFAULTS). _version and any
 -- other metadata are NOT part of a preset.
@@ -561,6 +586,21 @@ function ShatterMgr:StartOrUpdate(key, frame, iconTexture, duration, fade, dir, 
   local DIR_CONE_HALF = math.rad(cfg.dirCone)
 
   local PARTICLE_COUNT      = cfg.pCount
+  -- Dynamic cap: if many shatters are already active, drop the
+  -- particle count for THIS shatter only. Applied at start; running
+  -- shatters keep their original count (no mid-flight pop).
+  do
+    local capCfg = DoiteShatter.GetCapCfg()
+    if capCfg.enabled then
+      local activeNow = 0
+      for _ in pairs(self.active) do
+        activeNow = activeNow + 1
+      end
+      if activeNow >= capCfg.threshold and capCfg.count < PARTICLE_COUNT then
+        PARTICLE_COUNT = capCfg.count
+      end
+    end
+  end
   local PARTICLE_SIZE_MIN   = cfg.pSizeMin
   local PARTICLE_SIZE_MAX   = cfg.pSizeMax
   local PARTICLE_DIST_MIN   = cfg.pDistMin
@@ -757,7 +797,13 @@ function ShatterMgr:StartOrUpdate(key, frame, iconTexture, duration, fade, dir, 
   for pidx = 1, PARTICLE_COUNT do
     local q = _AcquireParticle(Sauce)
     q:SetParent(frame)
-    q:SetDrawLayer("OVERLAY", 7)
+    -- Particles go BEHIND the icon texture (BACKGROUND, sublevel 0),
+    -- not on top of it. When 50 additive particles converge on the
+    -- center at the end of the assembly, having them above the icon
+    -- produced a bright white blob in the middle of the frame that
+    -- outlived the piece assembly. Behind the icon, they read as an
+    -- ambient halo and are naturally masked by the icon itself.
+    q:SetDrawLayer("BACKGROUND", 0)
 
     local aBase = PARTICLE_ALPHA_MIN
                 + math.random() * (PARTICLE_ALPHA_MAX - PARTICLE_ALPHA_MIN)
@@ -922,6 +968,9 @@ local function _DS_PrintUsage()
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter preset list          -- show all presets")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter export [<name>]      -- print export string (current/preset)")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter import <string>      -- apply from an export string")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter cap [on|off]         -- dynamic particle cap (default off)")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter cap threshold <k>    -- active-shatter threshold (1..20, default 4)")
+  DEFAULT_CHAT_FRAME:AddMessage("  /dshatter cap count <n>        -- particle count under cap (5..50, default 15)")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter help                 -- this message")
   DEFAULT_CHAT_FRAME:AddMessage("Examples:")
   DEFAULT_CHAT_FRAME:AddMessage("  /dshatter grid 6")
@@ -1008,6 +1057,8 @@ local function _DS_HandleCommand(msg)
     end
     local ok, applied, skipped = DoiteShatter.ImportPreset(str)
     if not ok then
+      -- ImportPreset returns (false, errorString) on hard parse failure,
+      -- so `applied` here is really the error message.
       DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter:|r import failed: " .. tostring(applied))
       return
     end
@@ -1060,7 +1111,7 @@ local function _DS_HandleCommand(msg)
       return
     end
 
-    if sub == "delete" or sub == "del" then
+    if sub == "delete" then
       local name = args[3]
       if not name then
         DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter:|r usage: /dshatter preset delete <name>")
@@ -1079,8 +1130,61 @@ local function _DS_HandleCommand(msg)
     return
   end
 
+  if cmd == "cap" then
+    local capCfg = DoiteShatter.GetCapCfg()
+    local sub = args[2] and string.lower(args[2]) or ""
+
+    if sub == "" then
+      local stateStr = capCfg.enabled and "on" or "off"
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter cap:|r " .. stateStr ..
+        " (threshold=" .. tostring(capCfg.threshold) ..
+        ", count=" .. tostring(capCfg.count) .. ")")
+      return
+    end
+
+    if sub == "on" then
+      capCfg.enabled = true
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter cap:|r enabled")
+      return
+    end
+
+    if sub == "off" then
+      capCfg.enabled = false
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter cap:|r disabled")
+      return
+    end
+
+    if sub == "threshold" then
+      local v = tonumber(args[3])
+      if not v or v < 1 or v > 20 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter cap:|r threshold must be 1..20")
+        return
+      end
+      capCfg.threshold = math.floor(v + 0.5)
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter cap:|r threshold = " .. tostring(capCfg.threshold))
+      return
+    end
+
+    if sub == "count" then
+      local v = tonumber(args[3])
+      if not v or v < 5 or v > 50 then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4040/dshatter cap:|r count must be 5..50")
+        return
+      end
+      capCfg.count = math.floor(v + 0.5)
+      DEFAULT_CHAT_FRAME:AddMessage("|cff6FA8DC/dshatter cap:|r count = " .. tostring(capCfg.count))
+      return
+    end
+
+    DEFAULT_CHAT_FRAME:AddMessage(
+      "|cffff4040/dshatter cap:|r usage: /dshatter cap [on|off|threshold N|count N]")
+    return
+  end
+
   -- set form: /dshatter <key> <value>
-  if table.getn(args) >= 3 then
+  -- NOTE: getn must be >= 2 here, not 3 -- this form takes exactly
+  -- two tokens (key and value), and args[3] is not used.
+  if table.getn(args) >= 2 then
     local k = args[1]
     local v = args[2]
     if not PARAM_BOUNDS[k] then
