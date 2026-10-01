@@ -55,7 +55,7 @@ This is a reworked and expanded fork of the original [DoiteAuras](https://github
 
 ## Command-line reference
 
-Shatter + particle tuner https://github.com/ZaiiaDS/DoiteAuras/blob/main/dshatter.md
+Shatter + particle tuner https://github.com/ZaiiaDS/DoiteAuras/dshatter.md
 
 ## Installation
 1. Navigate to your World of Warcraft installation folder.
